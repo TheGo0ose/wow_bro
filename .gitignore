@@ -1,10 +1,12 @@
-__pycache__/
-*.pyc
-.pytest_cache/
 .venv/
-venv/
-output/
-# full organiser package (all 7 tasks); only task 7 data is copied into data/
-participants/
-# local clone of this same repository
-wow_bro/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.env
+outbox/*.jsonl
+!outbox/.gitkeep
+*.log
+.DS_Store

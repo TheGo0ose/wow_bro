@@ -1,33 +1,57 @@
-import sys
+from __future__ import annotations
+
+import os
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
+import pytest_asyncio
+from httpx import ASGITransport
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+# Ensure deterministic test defaults before importing settings/app.
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("TELECOM_ENABLED", "false")
+os.environ.setdefault("HMAC_SECRET", "test-secret-2026")
 
-from coverage.config import Bounds  # noqa: E402
+from app.config import get_settings
+from app.core.clock import clock
+from app.core.redis_client import close_redis, create_redis_client, set_redis_client
+from app.main import app
 
-DATA_DIR = ROOT / "data"
-
-
-@pytest.fixture
-def bounds() -> Bounds:
-    return Bounds(
-        lat_min=42.84,
-        lat_max=42.876,
-        lon_min=74.56,
-        lon_max=74.61,
-        grid_origin_lat=42.84,
-        grid_origin_lon=74.56,
-    )
+FIXED_TEST_EPOCH_MS = 1_795_190_400_000
 
 
-@pytest.fixture
-def write_csv(tmp_path):
-    def _write(name: str, text: str) -> Path:
-        path = tmp_path / name
-        path.write_text(text, encoding="utf-8")
-        return path
+@pytest_asyncio.fixture
+async def clean_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[Any]:
+    """Provide an isolated Redis DB, temporary outbox path, and frozen clock."""
+    monkeypatch.setenv("TELECOM_ENABLED", "false")
+    monkeypatch.setenv("HMAC_SECRET", "test-secret-2026")
+    monkeypatch.setenv("OTP_OUTBOX", str(tmp_path / "sms.jsonl"))
+    get_settings.cache_clear()
 
-    return _write
+    redis = create_redis_client()
+    await redis.flushdb()
+    set_redis_client(redis)
+    clock.freeze(FIXED_TEST_EPOCH_MS)
+
+    try:
+        yield redis
+    finally:
+        clock.reset()
+        await close_redis()
+        get_settings.cache_clear()
+
+
+@pytest_asyncio.fixture
+async def client(clean_env: Any) -> AsyncIterator[httpx.AsyncClient]:
+    """Return an async HTTPX client wired directly to the FastAPI ASGI app."""
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as async_client:
+        yield async_client

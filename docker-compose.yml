@@ -1,0 +1,92 @@
+services:
+  redis:
+    image: redis:8-alpine
+    container_name: otp-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  otp-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: otp-api
+    ports:
+      - "8000:8000"
+    environment:
+      HMAC_SECRET: ${HMAC_SECRET:-otp-shield-secret-key-2026}
+      REDIS_URL: redis://redis:6379/0
+      OTP_OUTBOX: /app/outbox/sms.jsonl
+      OTP_TTL: ${OTP_TTL:-120}
+      OTP_KEY_TTL: ${OTP_KEY_TTL:-3600}
+      LOCKOUT_TTL: ${LOCKOUT_TTL:-900}
+      MAX_VERIFY_ATTEMPTS: ${MAX_VERIFY_ATTEMPTS:-5}
+      IP_LIMIT_PER_MIN: ${IP_LIMIT_PER_MIN:-20}
+      IP_WINDOW_SECONDS: ${IP_WINDOW_SECONDS:-60}
+      SEND_LIMIT_10M: ${SEND_LIMIT_10M:-3}
+      SEND_WINDOW_SECONDS: ${SEND_WINDOW_SECONDS:-600}
+      TELECOM_GATEWAY_URL: http://telecom-gateway:1401
+      TELECOM_ENABLED: ${TELECOM_ENABLED:-auto}
+      TEST_MODE: ${TEST_MODE:-true}
+    volumes:
+      - ./outbox:/app/outbox
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: otp-rabbitmq
+    profiles: ["telecom"]
+    mem_limit: 384m
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  telecom-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: otp-telecom-gateway
+    profiles: ["telecom"]
+    mem_limit: 256m
+    command: ["python", "-m", "infra.telecom_smsc"]
+    ports:
+      - "1401:1401"
+      - "2775:2775"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DLR_CALLBACK_URL: http://otp-api:8000/telecom/dlr
+      GATEWAY_HTTP_PORT: "1401"
+      SMPP_PORT: "2775"
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:1401/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped

@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OTP-Shield // SOC &amp; Telecom Dashboard</title>
+  <style>
+    :root {
+      --bg: #070b14;
+      --bg-elev: #0d1424;
+      --card: #111a2e;
+      --card-border: #1e2c4a;
+      --text: #e6edf7;
+      --muted: #8ea0c0;
+      --emerald: #10b981;
+      --emerald-bg: rgba(16, 185, 129, 0.14);
+      --cyan: #38bdf8;
+      --cyan-bg: rgba(56, 189, 248, 0.14);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.15);
+      --red: #f43f5e;
+      --red-bg: rgba(244, 63, 94, 0.15);
+      --violet: #a78bfa;
+      --violet-bg: rgba(167, 139, 250, 0.16);
+      --slate: #94a3b8;
+      --slate-bg: rgba(148, 163, 184, 0.14);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: radial-gradient(circle at top right, #111d38 0%, var(--bg) 52%);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      line-height: 1.45;
+      padding: 18px 22px 32px;
+    }
+
+    .container {
+      max-width: 1440px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Top Status Bar */
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: var(--bg-elev);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, #0ea5e9, #10b981);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-family: var(--mono);
+      color: #03121e;
+      font-size: 15px;
+    }
+
+    .brand h1 {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .brand-sub {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .status-badges {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--mono);
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .pill-ok { background: var(--emerald-bg); color: var(--emerald); border-color: rgba(16, 185, 129, 0.35); }
+    .pill-info { background: var(--cyan-bg); color: var(--cyan); border-color: rgba(56, 189, 248, 0.35); }
+    .pill-warn { background: var(--amber-bg); color: var(--amber); border-color: rgba(245, 158, 11, 0.35); }
+    .pill-bad { background: var(--red-bg); color: var(--red); border-color: rgba(244, 63, 94, 0.35); }
+    .pill-muted { background: var(--slate-bg); color: var(--slate); border-color: rgba(148, 163, 184, 0.3); }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 8px currentColor;
+    }
+
+    /* KPI Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(170px, 1fr));
+      gap: 14px;
+    }
+
+    @media (max-width: 1100px) {
+      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 600px) {
+      .kpi-grid { grid-template-columns: 1fr; }
+    }
+
+    .kpi-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 15px 17px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .kpi-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: var(--accent, var(--cyan));
+    }
+
+    .kpi-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .kpi-value {
+      font-size: 30px;
+      font-weight: 800;
+      font-family: var(--mono);
+      color: var(--text);
+    }
+
+    .kpi-sub {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    /* Interactive Controls */
+    .controls-bar {
+      background: var(--bg-elev);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .control-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    input[type="text"] {
+      background: #080e1c;
+      border: 1px solid #263659;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: var(--mono);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input[type="text"]:focus {
+      border-color: var(--cyan);
+    }
+
+    button {
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.08s, opacity 0.15s, background 0.15s;
+      font-family: var(--sans);
+    }
+
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #0ea5e9);
+      color: #ffffff;
+    }
+
+    .btn-warn {
+      background: rgba(245, 158, 11, 0.18);
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, 0.45);
+    }
+
+    .btn-ghost {
+      background: rgba(148, 163, 184, 0.12);
+      color: var(--text);
+      border-color: rgba(148, 163, 184, 0.25);
+    }
+
+    .action-feedback {
+      font-size: 12px;
+      font-family: var(--mono);
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: #080e1c;
+      border: 1px solid var(--card-border);
+      color: var(--muted);
+      min-width: 240px;
+    }
+
+    /* Main Split Panels */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    @media (max-width: 1180px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      padding: 14px 18px;
+      background: rgba(7, 11, 20, 0.5);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .panel-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .filters input {
+      width: 155px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      max-height: 490px;
+      overflow-y: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: #0d1527;
+      color: var(--muted);
+      text-align: left;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--card-border);
+      z-index: 1;
+    }
+
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(30, 44, 74, 0.55);
+      font-family: var(--mono);
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    tr:hover td {
+      background: rgba(56, 189, 248, 0.04);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--mono);
+      letter-spacing: 0.02em;
+    }
+
+    .ev-sent { background: var(--cyan-bg); color: var(--cyan); }
+    .ev-verified { background: var(--emerald-bg); color: var(--emerald); }
+    .ev-failed { background: var(--amber-bg); color: var(--amber); }
+    .ev-expired { background: var(--slate-bg); color: var(--slate); }
+    .ev-locked { background: var(--red-bg); color: var(--red); }
+    .ev-ratelimit { background: var(--violet-bg); color: var(--violet); }
+
+    /* Telecom Accounts */
+    .telecom-accounts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(8, 14, 28, 0.45);
+    }
+
+    @media (max-width: 600px) {
+      .telecom-accounts { grid-template-columns: 1fr; }
+    }
+
+    .acct-box {
+      background: var(--bg-elev);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .acct-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .acct-meta {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .acct-bal {
+      font-size: 20px;
+      font-weight: 800;
+      font-family: var(--mono);
+      color: var(--emerald);
+      margin-top: 2px;
+    }
+
+    .empty-row {
+      text-align: center;
+      color: var(--muted);
+      padding: 26px !important;
+      font-family: var(--sans) !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Top Status Bar -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">OTP</div>
+        <div>
+          <h1>OTP-SHIELD // SOC &amp; TELECOM CONSOLE</h1>
+          <div class="brand-sub">HMAC-SHA256 &bull; Atomic Redis Lua &bull; Constant-Time Verify &bull; SMPP v3.4</div>
+        </div>
+      </div>
+      <div class="status-badges">
+        <span id="badge-api" class="pill pill-muted"><span class="dot"></span>API: CHECKING...</span>
+        <span id="badge-leak" class="pill pill-ok"><span class="dot"></span>0 OTP codes in logs</span>
+        <span id="badge-smpp" class="pill pill-muted"><span class="dot"></span>SMPP: STANDBY</span>
+        <span id="badge-stream" class="pill pill-info"><span class="dot"></span>SSE: CONNECTING</span>
+      </div>
+    </header>
+
+    <!-- KPI Cards -->
+    <section class="kpi-grid">
+      <div class="kpi-card" style="--accent: var(--cyan);">
+        <div class="kpi-label">OTP Sent</div>
+        <div id="kpi-sent" class="kpi-value">0</div>
+        <div class="kpi-sub">POST /otp/send 200 OK</div>
+      </div>
+      <div class="kpi-card" style="--accent: var(--emerald);">
+        <div class="kpi-label">OTP Verified</div>
+        <div id="kpi-verified" class="kpi-value">0</div>
+        <div class="kpi-sub">Single-use constant-time</div>
+      </div>
+      <div class="kpi-card" style="--accent: var(--red);">
+        <div class="kpi-label">Numbers Locked (423)</div>
+        <div id="kpi-locked" class="kpi-value">0</div>
+        <div id="kpi-locked-sub" class="kpi-sub">Total lock events: 0</div>
+      </div>
+      <div class="kpi-card" style="--accent: var(--violet);">
+        <div class="kpi-label">Attacks Blocked (429)</div>
+        <div id="kpi-blocked" class="kpi-value">0</div>
+        <div id="kpi-blocked-sub" class="kpi-sub">Send: 0 | IP Spray: 0</div>
+      </div>
+      <div class="kpi-card" style="--accent: var(--emerald);">
+        <div class="kpi-label">Successful Breaches (0)</div>
+        <div id="kpi-breaches" class="kpi-value" style="color: var(--emerald);">0</div>
+        <div class="kpi-sub">Replay &amp; brute-force stopped</div>
+      </div>
+    </section>
+
+    <!-- Interactive Controls -->
+    <section class="controls-bar">
+      <div class="control-group">
+        <label for="test-msisdn" style="font-size:12px;color:var(--muted);font-weight:600;">MSISDN:</label>
+        <input id="test-msisdn" type="text" value="996770730000" placeholder="996770730000" />
+        <button id="btn-send-otp" class="btn-primary">Send Test OTP</button>
+        <button id="btn-bulk-flood" class="btn-warn">Launch Bulk Flood (10 SMS)</button>
+      </div>
+      <div id="action-feedback" class="action-feedback">Ready. Click an action to test live defenses &amp; billing.</div>
+    </section>
+
+    <!-- Main Split: Security Audit Stream + Telecom & Billing -->
+    <section class="main-grid">
+      <!-- Security Audit Stream -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Security Audit Stream</div>
+          <div class="filters">
+            <input id="filter-msisdn" type="text" placeholder="Filter msisdn..." />
+            <input id="filter-ip" type="text" placeholder="Filter client_ip..." />
+            <button id="btn-clear-filters" class="btn-ghost" style="padding:6px 10px;font-size:12px;">Clear</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Event</th>
+                <th>MSISDN</th>
+                <th>Client IP</th>
+                <th>HTTP</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody id="events-tbody">
+              <tr><td colspan="6" class="empty-row">Waiting for security events...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Telecom & Billing Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Telecom &amp; Billing</div>
+          <span id="telecom-gw-detail" class="pill pill-muted" style="font-size:11px;padding:4px 9px;">Gateway: Checking</span>
+        </div>
+
+        <div class="telecom-accounts">
+          <div class="acct-box">
+            <div class="acct-head">
+              <span style="color:var(--cyan);">otp_svc</span>
+              <span class="badge ev-sent">100 TPS</span>
+            </div>
+            <div class="acct-meta">Priority: High &bull; 0.45 som/seg</div>
+            <div id="bal-otp" class="acct-bal">5000.00 som</div>
+          </div>
+          <div class="acct-box">
+            <div class="acct-head">
+              <span style="color:var(--amber);">bulk_mkt</span>
+              <span class="badge ev-failed">5 TPS</span>
+            </div>
+            <div class="acct-meta">Throttled &bull; 0.30 som/seg</div>
+            <div id="bal-bulk" class="acct-bal" style="color:var(--amber);">1000.00 som</div>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>msg_id</th>
+                <th>msisdn</th>
+                <th>channel</th>
+                <th>seg</th>
+                <th>cost_som</th>
+                <th>status</th>
+              </tr>
+            </thead>
+            <tbody id="cdrs-tbody">
+              <tr><td colspan="6" class="empty-row">No CDR records yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      const MAX_EVENTS = 150;
+      let allEvents = [];
+      let sseConnected = false;
+      let pollTimer = null;
+      let refreshDebounce = null;
+      let leakedCodesCount = 0;
+
+      const elApi = document.getElementById("badge-api");
+      const elLeak = document.getElementById("badge-leak");
+      const elSmpp = document.getElementById("badge-smpp");
+      const elStream = document.getElementById("badge-stream");
+
+      const elSent = document.getElementById("kpi-sent");
+      const elVerified = document.getElementById("kpi-verified");
+      const elLocked = document.getElementById("kpi-locked");
+      const elLockedSub = document.getElementById("kpi-locked-sub");
+      const elBlocked = document.getElementById("kpi-blocked");
+      const elBlockedSub = document.getElementById("kpi-blocked-sub");
+      const elBreaches = document.getElementById("kpi-breaches");
+
+      const elEventsBody = document.getElementById("events-tbody");
+      const elCdrsBody = document.getElementById("cdrs-tbody");
+      const elBalOtp = document.getElementById("bal-otp");
+      const elBalBulk = document.getElementById("bal-bulk");
+      const elGwDetail = document.getElementById("telecom-gw-detail");
+      const elFeedback = document.getElementById("action-feedback");
+
+      const filterMsisdn = document.getElementById("filter-msisdn");
+      const filterIp = document.getElementById("filter-ip");
+      const testMsisdn = document.getElementById("test-msisdn");
+
+      function escapeHtml(val) {
+        return String(val ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function num(val, fallback = 0) {
+        const n = Number(val);
+        return Number.isFinite(n) ? n : fallback;
+      }
+
+      function eventBadgeClass(evName) {
+        const e = String(evName || "").toUpperCase();
+        if (e === "OTP_SENT") return "ev-sent";
+        if (e === "OTP_VERIFIED") return "ev-verified";
+        if (e === "OTP_FAILED" || e === "OTP_INVALID_OR_USED") return "ev-failed";
+        if (e === "OTP_EXPIRED") return "ev-expired";
+        if (e === "MSISDN_LOCKED") return "ev-locked";
+        if (e.startsWith("RATE_LIMITED")) return "ev-ratelimit";
+        return "ev-expired";
+      }
+
+      function cdrBadgeClass(status) {
+        const s = String(status || "").toUpperCase();
+        if (s === "DELIVRD") return "ev-verified";
+        if (s === "SUBMITTED") return "ev-failed";
+        return "ev-locked";
+      }
+
+      function formatTime(ts) {
+        if (!ts) return "-";
+        const idx = ts.indexOf("T");
+        return idx >= 0 ? ts.slice(idx + 1, idx + 9) : ts;
+      }
+
+      function checkEventForLeak(ev) {
+        if (!ev || typeof ev !== "object") return;
+        if ("code" in ev || "otp" in ev || "otp_code" in ev) {
+          leakedCodesCount += 1;
+        }
+        elLeak.className = leakedCodesCount === 0 ? "pill pill-ok" : "pill pill-bad";
+        elLeak.innerHTML = `<span class="dot"></span>${leakedCodesCount} OTP codes in logs`;
+      }
+
+      function renderEvents() {
+        const mFilter = filterMsisdn.value.trim().toLowerCase();
+        const ipFilter = filterIp.value.trim().toLowerCase();
+
+        const filtered = allEvents.filter((ev) => {
+          const m = String(ev.msisdn || "").toLowerCase();
+          const ip = String(ev.client_ip || "").toLowerCase();
+          if (mFilter && !m.includes(mFilter)) return false;
+          if (ipFilter && !ip.includes(ipFilter)) return false;
+          return true;
+        });
+
+        if (filtered.length === 0) {
+          elEventsBody.innerHTML = '<tr><td colspan="6" class="empty-row">No matching security events.</td></tr>';
+          return;
+        }
+
+        elEventsBody.innerHTML = filtered
+          .slice(0, MAX_EVENTS)
+          .map((ev) => {
+            const cls = eventBadgeClass(ev.event);
+            return `<tr>
+              <td title="${escapeHtml(ev.ts)}">${escapeHtml(formatTime(ev.ts))}</td>
+              <td><span class="badge ${cls}">${escapeHtml(ev.event)}</span></td>
+              <td>${escapeHtml(ev.msisdn || "-")}</td>
+              <td>${escapeHtml(ev.client_ip || "-")}</td>
+              <td>${escapeHtml(ev.status_code || "-")}</td>
+              <td style="color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(ev.detail)}">${escapeHtml(ev.detail || "-")}</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      function renderTelecom(telecom) {
+        if (!telecom) return;
+        const gw = telecom.gateway || {};
+        const online = Boolean(
+          gw.online ||
+          gw.telecom_online ||
+          gw.bound === "BOUND_TRX" ||
+          gw.status === "BOUND_TRX" ||
+          gw.status === "online"
+        );
+
+        if (online) {
+          elSmpp.className = "pill pill-ok";
+          elSmpp.innerHTML = '<span class="dot"></span>SMPP: BOUND_TRX';
+          elGwDetail.className = "pill pill-ok";
+          elGwDetail.textContent = "Gateway: BOUND_TRX";
+        } else {
+          elSmpp.className = "pill pill-warn";
+          elSmpp.innerHTML = '<span class="dot"></span>SMPP: STANDBY';
+          elGwDetail.className = "pill pill-muted";
+          elGwDetail.textContent = "Gateway: STANDBY";
+        }
+
+        const balances = telecom.balances || {};
+        if ("otp_svc" in balances) {
+          elBalOtp.textContent = `${num(balances.otp_svc, 5000).toFixed(2)} som`;
+        }
+        if ("bulk_mkt" in balances) {
+          elBalBulk.textContent = `${num(balances.bulk_mkt, 1000).toFixed(2)} som`;
+        }
+
+        const cdrs = Array.isArray(telecom.cdrs) ? telecom.cdrs : [];
+        if (cdrs.length === 0) {
+          elCdrsBody.innerHTML = '<tr><td colspan="6" class="empty-row">No CDR records yet.</td></tr>';
+          return;
+        }
+
+        elCdrsBody.innerHTML = cdrs
+          .slice(0, 40)
+          .map((c) => {
+            const st = String(c.status || "SUBMITTED").toUpperCase();
+            return `<tr>
+              <td title="${escapeHtml(c.msg_id)}">${escapeHtml(String(c.msg_id || "").slice(0, 12))}</td>
+              <td>${escapeHtml(c.msisdn || "-")}</td>
+              <td>${escapeHtml(c.channel || "-")}</td>
+              <td>${escapeHtml(c.segments ?? 1)}</td>
+              <td>${num(c.cost_som, 0).toFixed(2)}</td>
+              <td><span class="badge ${cdrBadgeClass(st)}">${escapeHtml(st)}</span></td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      function applyStats(data) {
+        const counters = data.counters || {};
+        const sent = num(counters.otp_sent);
+        const verified = num(counters.otp_verified);
+        const activeLocks = num(data.active_locks);
+        const lockEvents = num(counters.msisdn_locked);
+        const rlSend = num(counters.rate_limited_send);
+        const rlIp = num(counters.rate_limited_ip);
+        const blocked = rlSend + rlIp;
+        const breaches = num(data.successful_breaches);
+
+        elSent.textContent = sent;
+        elVerified.textContent = verified;
+        elLocked.textContent = activeLocks;
+        elLockedSub.textContent = `Total lock events: ${lockEvents}`;
+        elBlocked.textContent = blocked;
+        elBlockedSub.textContent = `Send: ${rlSend} | IP Spray: ${rlIp}`;
+        elBreaches.textContent = breaches;
+        elBreaches.style.color = breaches === 0 ? "var(--emerald)" : "var(--red)";
+
+        if (Array.isArray(data.events)) {
+          data.events.forEach(checkEventForLeak);
+          allEvents = data.events.slice(0, MAX_EVENTS);
+          renderEvents();
+        }
+
+        if (data.telecom) {
+          renderTelecom(data.telecom);
+        }
+      }
+
+      async function fetchHealth() {
+        try {
+          const resp = await fetch("/health");
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const h = await resp.json();
+          const redisOk = h.redis === "up" || h.status === "ok";
+          elApi.className = redisOk ? "pill pill-ok" : "pill pill-bad";
+          elApi.innerHTML = `<span class="dot"></span>API: ${redisOk ? "OK / REDIS UP" : "DEGRADED"}`;
+          if (h.telecom) {
+            renderTelecom({ gateway: h.telecom });
+          }
+        } catch (_err) {
+          elApi.className = "pill pill-bad";
+          elApi.innerHTML = '<span class="dot"></span>API: OFFLINE';
+        }
+      }
+
+      async function fetchStats() {
+        try {
+          const params = new URLSearchParams({ limit: "100" });
+          const m = filterMsisdn.value.trim();
+          const ip = filterIp.value.trim();
+          if (m) params.set("msisdn", m);
+          if (ip) params.set("ip", ip);
+          const resp = await fetch(`/security/stats?${params.toString()}`);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          applyStats(data);
+        } catch (err) {
+          console.warn("Stats fetch failed:", err);
+        }
+      }
+
+      function scheduleStatsRefresh() {
+        if (refreshDebounce) clearTimeout(refreshDebounce);
+        refreshDebounce = setTimeout(() => {
+          fetchStats();
+        }, 250);
+      }
+
+      function startPollingFallback() {
+        if (pollTimer) return;
+        pollTimer = setInterval(() => {
+          fetchStats();
+          fetchHealth();
+        }, 2000);
+      }
+
+      function stopPollingFallback() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      function connectSSE() {
+        if (typeof EventSource === "undefined") {
+          elStream.className = "pill pill-warn";
+          elStream.innerHTML = '<span class="dot"></span>POLLING: 2s';
+          startPollingFallback();
+          return;
+        }
+
+        const es = new EventSource("/security/stream");
+
+        es.onopen = () => {
+          sseConnected = true;
+          stopPollingFallback();
+          elStream.className = "pill pill-ok";
+          elStream.innerHTML = '<span class="dot"></span>SSE: LIVE';
+        };
+
+        es.onmessage = (msg) => {
+          try {
+            const ev = JSON.parse(msg.data);
+            checkEventForLeak(ev);
+            allEvents.unshift(ev);
+            if (allEvents.length > MAX_EVENTS) {
+              allEvents.length = MAX_EVENTS;
+            }
+            renderEvents();
+            scheduleStatsRefresh();
+          } catch (err) {
+            console.warn("Invalid SSE event:", err);
+          }
+        };
+
+        es.onerror = () => {
+          sseConnected = false;
+          elStream.className = "pill pill-warn";
+          elStream.innerHTML = '<span class="dot"></span>POLLING: 2s';
+          startPollingFallback();
+        };
+      }
+
+      // Filter listeners
+      filterMsisdn.addEventListener("input", () => {
+        renderEvents();
+        scheduleStatsRefresh();
+      });
+      filterIp.addEventListener("input", () => {
+        renderEvents();
+        scheduleStatsRefresh();
+      });
+      document.getElementById("btn-clear-filters").addEventListener("click", () => {
+        filterMsisdn.value = "";
+        filterIp.value = "";
+        renderEvents();
+        fetchStats();
+      });
+
+      // Interactive Controls
+      document.getElementById("btn-send-otp").addEventListener("click", async () => {
+        const msisdn = testMsisdn.value.trim();
+        elFeedback.textContent = `Sending OTP to ${msisdn}...`;
+        try {
+          const resp = await fetch("/otp/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ msisdn }),
+          });
+          const body = await resp.json().catch(() => ({}));
+          if (resp.ok) {
+            elFeedback.style.color = "var(--emerald)";
+            elFeedback.textContent = `POST /otp/send -> ${resp.status} (${body.status || "sent"}, ttl=${body.expires_in || 120}s)`;
+          } else {
+            elFeedback.style.color = "var(--amber)";
+            elFeedback.textContent = `POST /otp/send -> ${resp.status} (${body.detail || "blocked"}, retry=${body.retry_after ?? "-"}s)`;
+          }
+          scheduleStatsRefresh();
+        } catch (err) {
+          elFeedback.style.color = "var(--red)";
+          elFeedback.textContent = `POST /otp/send failed: ${err.message}`;
+        }
+      });
+
+      document.getElementById("btn-bulk-flood").addEventListener("click", async () => {
+        elFeedback.textContent = "Launching Bulk Flood (10 SMS via bulk_mkt)...";
+        try {
+          const resp = await fetch("/telecom/bulk", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              count: 10,
+              text: "Akciya! Skidki 20% tolko segodnya!"
+            }),
+          });
+          const body = await resp.json().catch(() => ({}));
+          elFeedback.style.color = resp.ok ? "var(--cyan)" : "var(--amber)";
+          elFeedback.textContent = `POST /telecom/bulk -> ${resp.status} (${JSON.stringify(body).slice(0, 80)})`;
+          scheduleStatsRefresh();
+        } catch (err) {
+          elFeedback.style.color = "var(--red)";
+          elFeedback.textContent = `POST /telecom/bulk failed: ${err.message}`;
+        }
+      });
+
+      // Initial load + periodic telecom CDR refresh (even while SSE is open, CDR DLR updates happen via /telecom/dlr)
+      fetchHealth();
+      fetchStats();
+      connectSSE();
+      setInterval(() => {
+        if (sseConnected) {
+          fetchStats();
+          fetchHealth();
+        }
+      }, 4000);
+    })();
+  </script>
+</body>
+</html>
