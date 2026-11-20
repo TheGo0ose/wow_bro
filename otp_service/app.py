@@ -14,6 +14,7 @@ from .dashboard import DASHBOARD_HTML
 from .delivery import OutboxDelivery
 from .security_log import SecurityLog
 from .service import OtpService, Result
+from .storage import MemoryStore, RedisStore, Store
 
 _INVALID_JSON = object()
 
@@ -30,7 +31,15 @@ def _respond(result: Result) -> JSONResponse:
     return JSONResponse(result.body, status_code=result.status, headers=result.headers)
 
 
-def build_service(settings: Settings) -> OtpService:
+def build_store(settings: Settings, redis_client: Any = None) -> Store:
+    if settings.storage == "redis" or redis_client is not None:
+        if redis_client is not None:
+            return RedisStore(redis_client, settings.limits(), settings.redis_prefix)
+        return RedisStore.from_url(settings.redis_url, settings.limits(), settings.redis_prefix)
+    return MemoryStore(settings.limits())
+
+
+def build_service(settings: Settings, redis_client: Any = None) -> OtpService:
     clock = FakeClock(settings.test_start_time) if settings.test_mode else SystemClock()
     return OtpService(
         settings=settings,
@@ -38,6 +47,7 @@ def build_service(settings: Settings) -> OtpService:
         delivery=OutboxDelivery(settings.outbox_path),
         security_log=SecurityLog(settings.security_log_path),
         avoid_repeat_code=settings.test_mode,
+        store=build_store(settings, redis_client),
     )
 
 
@@ -87,7 +97,7 @@ def create_app(settings: Settings | None = None, service: OtpService | None = No
 
     @app.get("/health")
     def health() -> dict[str, Any]:
-        return {"status": "ok", "test_mode": settings.test_mode}
+        return {"status": "ok", "test_mode": settings.test_mode, "storage": service.store.name}
 
     if settings.dashboard_enabled:
         @app.get("/dashboard", response_class=HTMLResponse)
@@ -114,7 +124,7 @@ def create_app(settings: Settings | None = None, service: OtpService | None = No
     @app.post("/__test__/reset")
     def test_reset(request: Request) -> dict[str, Any]:
         require_loopback(request)
-        service.reset()
+        service.reset()        # сбрасывает и хранилище (в т.ч. ключи Redis с нашим префиксом)
         service.clock.reset()  # type: ignore[attr-defined]
         service.log.clear_memory()
         return {"now": service.clock.iso()}

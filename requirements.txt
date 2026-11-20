@@ -1,4 +1,7 @@
 fastapi>=0.110
 uvicorn>=0.29
 httpx>=0.27
+redis>=5.0
+# только для тестов: in-process Redis с настоящим Lua-интерпретатором
+fakeredis[lua]>=2.23
 pytest>=8.0

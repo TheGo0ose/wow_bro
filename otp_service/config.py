@@ -60,6 +60,21 @@ class Settings:
 
     dashboard_enabled: bool = True
 
+    # --- хранилище ---
+    storage: str = "memory"                     # memory | redis
+    redis_url: str = "redis://localhost:6379/0"
+    redis_prefix: str = "otp:"
+
+    def limits(self):
+        from .storage import Limits
+
+        return Limits(
+            code_ttl=self.code_ttl, send_window=self.send_window,
+            send_max=self.send_max_in_window, send_delays=tuple(self.send_delays),
+            max_failures=self.max_failures, lock_duration=self.lock_duration,
+            ip_window=self.ip_window, ip_max=self.ip_max_in_window,
+        )
+
     @classmethod
     def from_env(cls) -> "Settings":
         s = cls()
@@ -92,4 +107,10 @@ class Settings:
         s.test_mode = _env_bool("OTP_TEST_MODE", False)
         s.test_start_time = os.environ.get("OTP_TEST_START_TIME", s.test_start_time)
         s.dashboard_enabled = _env_bool("OTP_DASHBOARD", True)
+
+        s.storage = os.environ.get("OTP_STORAGE", s.storage).strip().lower()
+        if s.storage not in {"memory", "redis"}:
+            raise ValueError("OTP_STORAGE должен быть memory или redis")
+        s.redis_url = os.environ.get("OTP_REDIS_URL", s.redis_url)
+        s.redis_prefix = os.environ.get("OTP_REDIS_PREFIX", s.redis_prefix)
         return s

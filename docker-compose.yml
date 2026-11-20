@@ -7,7 +7,22 @@ services:
       # В реальном развёртывании задайте свой секрет: OTP_SECRET=... docker compose up
       OTP_SECRET: ${OTP_SECRET:-change-me-hackathon-secret}
       OTP_TEST_MODE: ${OTP_TEST_MODE:-0}
+      OTP_STORAGE: redis
+      OTP_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       # outbox/sms.jsonl и logs/security.jsonl видны на хосте в корне репозитория
       - ./outbox:/app/outbox
       - ./logs:/app/logs
+
+  redis:
+    image: redis:7-alpine
+    # Только в памяти: коды и счётчики — краткоживущие данные с TTL, на диск не пишем.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

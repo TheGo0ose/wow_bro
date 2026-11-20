@@ -8,8 +8,6 @@ import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-from conftest import Env
-
 from otp_service.codes import CodeHasher, secure_code
 from otp_service.validation import ValidationError, parse_verify
 
@@ -22,8 +20,8 @@ def test_secure_code_format():
         assert re.fullmatch(r"\d{6}", secure_code())
 
 
-def test_leading_zeros_and_000000_accepted(tmp_path):
-    env = Env(tmp_path, codes=["000000", "000123"])
+def test_leading_zeros_and_000000_accepted(make_env):
+    env = make_env(["000000", "000123"])
     assert env.send() == 200
     assert env.code() == "000000"
     assert env.verify("000000") == 200
@@ -42,28 +40,28 @@ def test_unicode_digits_rejected():
 
 
 # ---------------------------------------------------------------- хранение
-def test_only_hmac_stored(tmp_path):
-    env = Env(tmp_path, codes=["482915"])
+def test_only_hmac_stored(make_env):
+    env = make_env(["482915"])
     env.send()
-    otp = env.service._numbers[N].otp
-    assert otp is not None
-    assert "482915" not in repr(env.service._numbers)
-    assert otp.code_hash == CodeHasher(b"test-secret").digest(N, otp.otp_id, "482915")
-    assert len(otp.code_hash) == 32
+    found = env.store.fetch(N, env.clock.now())
+    assert found.status == "ok"
+    assert "482915" not in env.store.dump()          # открытого кода нет нигде в хранилище
+    assert found.code_hash == CodeHasher(b"test-secret").digest(N, found.otp_id, "482915")
+    assert len(found.code_hash) == 32
 
 
-def test_same_code_different_hash_per_issue(tmp_path):
-    env = Env(tmp_path, codes=["111111", "111111"])
+def test_same_code_different_hash_per_issue(make_env):
+    env = make_env(["111111", "111111"])
     env.send()
-    h1 = env.service._numbers[N].otp.code_hash
+    h1 = env.store.fetch(N, env.clock.now()).code_hash
     env.clock.advance(30)
     env.send()
-    h2 = env.service._numbers[N].otp.code_hash
+    h2 = env.store.fetch(N, env.clock.now()).code_hash
     assert h1 != h2
 
 
-def test_security_log_never_contains_code(tmp_path):
-    env = Env(tmp_path, codes=["654321"])
+def test_security_log_never_contains_code(make_env):
+    env = make_env(["654321"])
     env.send()
     env.verify("000001")
     env.verify("654321")
