@@ -21,7 +21,7 @@ const CHANNELS = [
 
 export default function MessageSenderPanel({ authToken, sessionMsisdn }) {
   const [channel, setChannel] = useState('sms');
-  const [recipient, setRecipient] = useState('+79991234567');
+  const [recipient, setRecipient] = useState('996770730000');
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [feedback, setFeedback] = useState(null);
@@ -139,7 +139,7 @@ export default function MessageSenderPanel({ authToken, sessionMsisdn }) {
               value={recipient}
               onChange={(e) => setRecipient(e.target.value)}
               placeholder={
-                channel === 'email' ? 'user@example.com' : '+79991234567'
+                channel === 'email' ? 'user@inai.kg' : '996770730000'
               }
               className="w-full rounded-2xl border border-white/15 bg-black/40 px-4 py-3 font-mono text-sm text-white placeholder:text-zinc-600 focus:border-fuchsia-400/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20"
             />
