@@ -2,7 +2,12 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: ["web-test"]
+    branches:
+      - main
+      - web-test
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -10,7 +15,6 @@ permissions:
   pages: write
   id-token: write
 
-# Один деплой за раз; новый запуск заменяет ещё не начавшийся.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -19,17 +23,31 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      # base = /<имя репозитория>/, как у проекта на GitHub Pages
-      - run: npx vite build --base=/${{ github.event.repository.name }}/
-      - uses: actions/upload-pages-artifact@v3
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npx vite build --base=/${{ github.event.repository.name }}/
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: ./frontend/dist
 
   deploy:
     needs: build
@@ -38,5 +56,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
