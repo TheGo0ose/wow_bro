@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   Check,
   Globe,
-  MessageSquarePlus,
   RotateCcw,
   Settings2,
+  Shield,
   ShieldCheck,
 } from 'lucide-react';
 import RegistrationPanel from './components/RegistrationPanel';
-import MessageSenderPanel from './components/MessageSenderPanel';
+import BackendDemoPanel from './components/BackendDemoPanel';
 import {
   checkOtpHealth,
   getApiBaseUrl,
@@ -18,51 +18,72 @@ import {
   sendOtp,
   verifyOtp,
 } from './api/client';
-import { buildMsisdn, isValidMsisdn } from './utils/phoneMask';
+import {
+  clearActiveSession,
+  findAccountConflict,
+  findAccountForLogin,
+  hashPassword,
+  loadAccounts,
+  loadActiveSession,
+  loadPendingRegistration,
+  removeAccountById,
+  saveActiveSession,
+  savePendingRegistration,
+  upsertAccount,
+} from './utils/authStore';
+import { buildMsisdn, formatLogTime, isValidMsisdn } from './utils/phoneMask';
 
-const USER_SESSION_STORAGE_KEY = 'otp_registered_user';
 const DEFAULT_OTP_TTL = 120;
 const PROGRESSIVE_COOLDOWNS = [30, 60, 120];
 const DEFAULT_LOCKOUT_SECONDS = 15 * 60;
 
-function loadStoredUser() {
-  try {
-    const raw = localStorage.getItem(USER_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed && parsed.msisdn ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 export default function App() {
-  // Базовый URL OTP Shield (из .env: VITE_OTP_API_URL=http://172.20.10.3:8000)
+  // Настройка URL OTP Shield (VITE_OTP_API_URL=http://172.20.10.3:8000)
   const [apiBaseUrl, setApiBaseUrl] = useState(() => getApiBaseUrl());
   const [isEditingApi, setIsEditingApi] = useState(false);
   const [apiDraft, setApiDraft] = useState(apiBaseUrl);
 
   // Статус GET /health
   const [healthState, setHealthState] = useState({
-    status: 'idle', // 'idle' | 'checking' | 'online' | 'offline'
+    status: 'idle',
     detail: 'Статус защиты OTP',
   });
   const [resetNotice, setResetNotice] = useState('');
 
-  // Зарегистрированный профиль в localStorage
-  const [registeredUser, setRegisteredUser] = useState(() => loadStoredUser());
+  // Реальные аккаунты и активная сессия
+  const [accounts, setAccounts] = useState(() => loadAccounts());
+  const [activeUser, setActiveUser] = useState(() => loadActiveSession());
 
-  // Поля формы регистрации (Экран 1)
-  const [fullName, setFullName] = useState(() => loadStoredUser()?.name || '');
-  const [email, setEmail] = useState(() => loadStoredUser()?.email || '');
+  // Режим формы: регистрация / вход
+  const [authMode, setAuthMode] = useState('register'); // 'register' | 'login'
+  const [step, setStep] = useState(() => (loadActiveSession() ? 'success' : 'form'));
+
+  // Поля формы регистрации
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [countryKey, setCountryKey] = useState('KG');
   const [phoneDigits, setPhoneDigits] = useState('');
-  const [step, setStep] = useState(() => (loadStoredUser() ? 'success' : 'phone'));
+
+  // Поля формы входа
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+
+  // Снимок данных пользователя, ожидающего подтверждения OTP (сохраняется в ref + sessionStorage,
+  // чтобы логин НИКОГДА не сбрасывался на этапе ввода кода подтверждения!)
+  const [pendingAuth, setPendingAuth] = useState(() => loadPendingRegistration());
+  const pendingAuthRef = useRef(pendingAuth);
+
+  const updatePendingAuth = useCallback((nextDraft) => {
+    pendingAuthRef.current = nextDraft;
+    setPendingAuth(nextDraft);
+    savePendingRegistration(nextDraft);
+  }, []);
+
+  // OTP состояние и таймеры
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Два независимых таймера (TTL кода 120с + cooldown повторной отправки 30 → 60 → 120с) + блокировка 423
   const [otpTtlTotal, setOtpTtlTotal] = useState(DEFAULT_OTP_TTL);
   const [otpCountdown, setOtpCountdown] = useState(DEFAULT_OTP_TTL);
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -75,23 +96,46 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [shakeKey, setShakeKey] = useState(0);
 
+  // Живой журнал реальных HTTP-запросов к бэкенду
+  const [httpLogs, setHttpLogs] = useState([]);
+
+  const recordHttpLog = useCallback((res) => {
+    const responsePreview = res.data
+      ? JSON.stringify(res.data)
+      : res.error || '';
+    setHttpLogs((prev) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        time: formatLogTime(),
+        method: res.method,
+        path: res.path,
+        status: res.status,
+        latencyMs: res.latencyMs,
+        requestBody: res.requestBody,
+        responsePreview,
+      },
+      ...prev.slice(0, 39),
+    ]);
+  }, []);
+
   const handleCheckHealth = useCallback(async () => {
     setHealthState({ status: 'checking', detail: 'Проверка /health...' });
     const res = await checkOtpHealth();
+    recordHttpLog(res);
     if (res.ok) {
       setHealthState({ status: 'online', detail: 'OTP Shield: ONLINE' });
     } else {
       setHealthState({ status: 'offline', detail: 'OTP Shield: OFFLINE' });
     }
-  }, []);
+  }, [recordHttpLog]);
 
-  // Проверяем доступность OTP Shield при открытии страницы
   useEffect(() => {
     handleCheckHealth();
   }, [handleCheckHealth]);
 
   const handleTestReset = async () => {
     const res = await resetTestLimits();
+    recordHttpLog(res);
     if (res.ok) {
       setLockoutSeconds(0);
       setResendCooldown(0);
@@ -170,31 +214,15 @@ export default function App() {
     handleCheckHealth();
   };
 
-  // POST /otp/send {"msisdn": "996770730000"}
-  const handleRequestCode = async () => {
-    if (isLoading || lockoutSeconds > 0 || resendCooldown > 0) return;
-    const msisdn = buildMsisdn(countryKey, phoneDigits);
-
-    if (!fullName.trim()) {
-      setErrorStatus(422);
-      setErrorDetail('VALIDATION_ERROR');
-      setErrorMessage('Введите имя или логин перед отправкой кода.');
-      return;
-    }
-
-    if (!isValidMsisdn(msisdn)) {
-      setErrorStatus(422);
-      setErrorDetail('VALIDATION_ERROR');
-      setErrorMessage('Проверьте формат номера (7–15 цифр) или кода (6 цифр)');
-      return;
-    }
-
+  // Общая отправка POST /otp/send на OTP Shield
+  const dispatchOtpSend = async (draft) => {
     setIsLoading(true);
     setErrorStatus(null);
     setErrorDetail(null);
     setErrorMessage('');
 
-    const res = await sendOtp(msisdn);
+    const res = await sendOtp(draft.msisdn);
+    recordHttpLog(res);
     setIsLoading(false);
 
     if (res.ok) {
@@ -203,6 +231,7 @@ export default function App() {
         PROGRESSIVE_COOLDOWNS[
           Math.min(sendAttemptIndex, PROGRESSIVE_COOLDOWNS.length - 1)
         ];
+      updatePendingAuth(draft);
       setOtpDigits(['', '', '', '', '', '']);
       setOtpTtlTotal(ttl);
       setOtpCountdown(ttl);
@@ -233,11 +262,107 @@ export default function App() {
     setErrorMessage(res.error);
   };
 
-  // POST /otp/verify {"msisdn": "996770730000", "code": "012345"}
+  // Шаг 1A: Реальная регистрация (обязательные логин, номер, пароль + проверка дубликатов)
+  const handleSubmitRegister = async () => {
+    if (isLoading || lockoutSeconds > 0 || resendCooldown > 0) return;
+
+    const cleanUsername = username.trim();
+    const msisdn = buildMsisdn(countryKey, phoneDigits);
+
+    if (cleanUsername.length < 2) {
+      setErrorStatus(422);
+      setErrorDetail('VALIDATION_ERROR');
+      setErrorMessage('Укажите логин или имя пользователя (минимум 2 символа).');
+      return;
+    }
+    if (!isValidMsisdn(msisdn)) {
+      setErrorStatus(422);
+      setErrorDetail('VALIDATION_ERROR');
+      setErrorMessage('Проверьте формат номера (7–15 цифр) или кода (6 цифр)');
+      return;
+    }
+    if (password.length < 6) {
+      setErrorStatus(422);
+      setErrorDetail('VALIDATION_ERROR');
+      setErrorMessage('Пароль обязателен (минимум 6 символов).');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorStatus(422);
+      setErrorDetail('VALIDATION_ERROR');
+      setErrorMessage('Пароли не совпадают.');
+      return;
+    }
+
+    const conflict = findAccountConflict({ username: cleanUsername, msisdn });
+    if (conflict) {
+      setErrorStatus(409);
+      setErrorDetail('ACCOUNT_EXISTS');
+      setErrorMessage(conflict);
+      return;
+    }
+
+    const passwordHash = await hashPassword(password);
+    const draft = {
+      flow: 'register',
+      username: cleanUsername,
+      email: email.trim() || null,
+      msisdn,
+      passwordHash,
+    };
+
+    await dispatchOtpSend(draft);
+  };
+
+  // Шаг 1B: Реальный вход (проверка логина/телефона + хэша пароля → 2FA через OTP Shield)
+  const handleSubmitLogin = async () => {
+    if (isLoading || lockoutSeconds > 0 || resendCooldown > 0) return;
+
+    const account = findAccountForLogin(loginIdentifier);
+    if (!account) {
+      setErrorStatus(404);
+      setErrorDetail('USER_NOT_FOUND');
+      setErrorMessage(
+        'Аккаунт не найден. Проверьте логин/телефон или сначала пройдите регистрацию.'
+      );
+      return;
+    }
+
+    const inputHash = await hashPassword(loginPassword);
+    if (inputHash !== account.passwordHash) {
+      setErrorStatus(401);
+      setErrorDetail('INVALID_PASSWORD');
+      setErrorMessage('Неверный пароль для указанного аккаунта.');
+      return;
+    }
+
+    const draft = {
+      flow: 'login',
+      accountId: account.id,
+      username: account.username,
+      email: account.email || null,
+      msisdn: account.msisdn,
+      passwordHash: account.passwordHash,
+      registeredAt: account.registeredAt,
+    };
+
+    await dispatchOtpSend(draft);
+  };
+
+  // Повторная отправка SMS на шаге 2
+  const handleResendOtp = async () => {
+    if (isLoading || lockoutSeconds > 0 || resendCooldown > 0) return;
+    const draft = pendingAuthRef.current;
+    if (!draft?.msisdn) return;
+    await dispatchOtpSend(draft);
+  };
+
+  // Шаг 2: Подтверждение 6-значного кода через POST /otp/verify
   const handleVerifyCode = useCallback(
     async (explicitCode) => {
       if (isLoading || lockoutSeconds > 0 || otpCountdown <= 0) return;
-      const msisdn = buildMsisdn(countryKey, phoneDigits);
+      const draft = pendingAuthRef.current || loadPendingRegistration();
+      const msisdn = draft?.msisdn || buildMsisdn(countryKey, phoneDigits);
       const code =
         typeof explicitCode === 'string' ? explicitCode : otpDigits.join('');
       if (code.length !== 6) return;
@@ -248,24 +373,29 @@ export default function App() {
       setErrorMessage('');
 
       const res = await verifyOtp(msisdn, code);
+      recordHttpLog(res);
       setIsLoading(false);
 
       if (res.ok) {
+        const resolvedUsername =
+          (draft?.username || username || '').trim();
         const userRecord = {
-          name: fullName.trim() || 'Пользователь',
-          email: email.trim() || null,
+          id: draft?.accountId || `usr_${Date.now()}`,
+          username: resolvedUsername,
+          email: draft?.email ?? (email.trim() || null),
           msisdn,
-          registeredAt: new Date().toISOString(),
+          passwordHash: draft?.passwordHash || '',
+          registeredAt: draft?.registeredAt || new Date().toISOString(),
         };
-        try {
-          localStorage.setItem(
-            USER_SESSION_STORAGE_KEY,
-            JSON.stringify(userRecord)
-          );
-        } catch {
-          // Ignore storage error
-        }
-        setRegisteredUser(userRecord);
+
+        const updatedAccounts = upsertAccount(userRecord);
+        setAccounts(updatedAccounts);
+        saveActiveSession(userRecord);
+        setActiveUser(userRecord);
+        updatePendingAuth(null);
+        setPassword('');
+        setConfirmPassword('');
+        setLoginPassword('');
         setStep('success');
         return;
       }
@@ -313,19 +443,24 @@ export default function App() {
       countryKey,
       phoneDigits,
       otpDigits,
-      fullName,
+      username,
       email,
+      recordHttpLog,
+      updatePendingAuth,
     ]
   );
 
-  const handleResetSession = () => {
-    try {
-      localStorage.removeItem(USER_SESSION_STORAGE_KEY);
-    } catch {
-      // Ignore
-    }
-    setRegisteredUser(null);
-    setStep('phone');
+  const handleLogout = () => {
+    clearActiveSession();
+    updatePendingAuth(null);
+    setActiveUser(null);
+    setStep('form');
+    setUsername('');
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
+    setPhoneDigits('');
+    setLoginPassword('');
     setOtpDigits(['', '', '', '', '', '']);
     setOtpTtlTotal(DEFAULT_OTP_TTL);
     setOtpCountdown(DEFAULT_OTP_TTL);
@@ -335,7 +470,27 @@ export default function App() {
     setErrorStatus(null);
     setErrorDetail(null);
     setErrorMessage('');
-    setPassword('');
+  };
+
+  const handleDeleteAccount = (id) => {
+    const next = removeAccountById(id);
+    setAccounts(next);
+    if (activeUser?.id === id) {
+      handleLogout();
+    }
+  };
+
+  const handleSelectAccountForLogin = (account) => {
+    clearActiveSession();
+    updatePendingAuth(null);
+    setActiveUser(null);
+    setAuthMode('login');
+    setStep('form');
+    setLoginIdentifier(account.username);
+    setLoginPassword('');
+    setErrorStatus(null);
+    setErrorDetail(null);
+    setErrorMessage('');
   };
 
   return (
@@ -345,19 +500,19 @@ export default function App() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-fuchsia-400/30 bg-gradient-to-br from-fuchsia-500/25 to-violet-600/20">
-              <MessageSquarePlus className="h-5 w-5 text-fuchsia-300" />
+              <Shield className="h-5 w-5 text-fuchsia-300" />
             </div>
             <div>
               <h1 className="text-lg font-bold tracking-tight text-white">
-                PulseConnect × OTP Shield
+                OTP Shield · Демонстрация бэкенда
               </h1>
               <p className="text-xs text-zinc-400">
-                Клиентский сайт регистрации и отправки сообщений
+                Реальная регистрация и 2FA-вход с защитой от brute-force и спама
               </p>
             </div>
           </div>
 
-          {/* Управление подключением к OTP Shield (http://172.20.10.3:8000) */}
+          {/* Управление подключением к OTP Shield */}
           <div className="flex flex-wrap items-center gap-2">
             {resetNotice && (
               <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300 animate-fade-in-soft">
@@ -365,7 +520,6 @@ export default function App() {
               </span>
             )}
 
-            {/* Бейдж "Статус защиты OTP" (GET /health) */}
             <button
               type="button"
               onClick={handleCheckHealth}
@@ -376,7 +530,7 @@ export default function App() {
                     ? 'border-red-500/40 bg-red-500/15 text-red-300'
                     : 'border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10'
               }`}
-              title="Нажмите для проверки GET /health на OTP-шлюзе"
+              title="Проверить GET /health на OTP-шлюзе"
             >
               {healthState.status === 'checking' ? (
                 <Activity className="h-3.5 w-3.5 animate-spin text-fuchsia-300" />
@@ -386,7 +540,6 @@ export default function App() {
               <span>{healthState.detail}</span>
             </button>
 
-            {/* Быстрый сброс лимитов для демо (POST /_test/reset?flush=true) */}
             <button
               type="button"
               onClick={handleTestReset}
@@ -438,12 +591,21 @@ export default function App() {
         <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-12 lg:items-stretch">
           <div className="lg:col-span-5 flex flex-col">
             <RegistrationPanel
-              fullName={fullName}
-              onChangeFullName={setFullName}
+              authMode={authMode}
+              onChangeAuthMode={(mode) => {
+                setAuthMode(mode);
+                setErrorStatus(null);
+                setErrorDetail(null);
+                setErrorMessage('');
+              }}
+              username={username}
+              onChangeUsername={setUsername}
               email={email}
               onChangeEmail={setEmail}
               password={password}
               onChangePassword={setPassword}
+              confirmPassword={confirmPassword}
+              onChangeConfirmPassword={setConfirmPassword}
               countryKey={countryKey}
               onChangeCountry={(next) => {
                 setCountryKey(next);
@@ -452,7 +614,12 @@ export default function App() {
               }}
               phoneDigits={phoneDigits}
               onChangePhoneDigits={setPhoneDigits}
+              loginIdentifier={loginIdentifier}
+              onChangeLoginIdentifier={setLoginIdentifier}
+              loginPassword={loginPassword}
+              onChangeLoginPassword={setLoginPassword}
               step={step}
+              pendingAuth={pendingAuth}
               otpDigits={otpDigits}
               onChangeOtpDigits={setOtpDigits}
               otpCountdown={otpCountdown}
@@ -464,23 +631,30 @@ export default function App() {
               errorMessage={errorMessage}
               shakeKey={shakeKey}
               isLoading={isLoading}
-              registeredUser={registeredUser}
-              onRequestCode={handleRequestCode}
+              activeUser={activeUser}
+              onSubmitRegister={handleSubmitRegister}
+              onSubmitLogin={handleSubmitLogin}
+              onResendOtp={handleResendOtp}
               onVerifyCode={handleVerifyCode}
-              onBackToPhone={() => {
-                setStep('phone');
+              onBackToForm={() => {
+                setStep('form');
                 setErrorStatus(null);
                 setErrorDetail(null);
                 setErrorMessage('');
               }}
-              onResetSession={handleResetSession}
+              onLogout={handleLogout}
             />
           </div>
 
           <div className="lg:col-span-7 flex flex-col">
-            <MessageSenderPanel
-              authToken={null}
-              sessionMsisdn={registeredUser?.msisdn || null}
+            <BackendDemoPanel
+              apiBaseUrl={apiBaseUrl}
+              accounts={accounts}
+              activeUser={activeUser}
+              httpLogs={httpLogs}
+              onClearLogs={() => setHttpLogs([])}
+              onDeleteAccount={handleDeleteAccount}
+              onSelectAccountForLogin={handleSelectAccountForLogin}
             />
           </div>
         </div>

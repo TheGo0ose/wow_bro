@@ -83,6 +83,7 @@ export function resolveOtpErrorMessage({
 
 async function requestJson(method, path, body, token) {
   const baseUrl = getApiBaseUrl();
+  const startedAt = performance.now();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -104,10 +105,15 @@ async function requestJson(method, path, body, token) {
     });
   } catch (err) {
     clearTimeout(timeoutId);
+    const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
     const isTimeout = err?.name === 'AbortError';
     return {
       ok: false,
       status: 0,
+      method,
+      path,
+      requestBody: body ?? null,
+      latencyMs,
       detail: isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR',
       retryAfter: 0,
       attemptsRemaining: undefined,
@@ -121,6 +127,7 @@ async function requestJson(method, path, body, token) {
     clearTimeout(timeoutId);
   }
 
+  const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
   let data = null;
   try {
     data = await response.json();
@@ -160,6 +167,10 @@ async function requestJson(method, path, body, token) {
   return {
     ok: response.ok,
     status: response.status,
+    method,
+    path,
+    requestBody: body ?? null,
+    latencyMs,
     detail,
     retryAfter,
     attemptsRemaining,
@@ -203,20 +214,4 @@ export function checkOtpHealth() {
  */
 export function resetTestLimits() {
   return requestJson('POST', '/_test/reset?flush=true');
-}
-
-/**
- * Отправка сообщения через клиентскую панель.
- */
-export function sendMessage({ recipient, text, channel, token }) {
-  return requestJson(
-    'POST',
-    '/messages/send',
-    {
-      recipient,
-      text,
-      channel,
-    },
-    token
-  );
 }
