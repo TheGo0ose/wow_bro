@@ -433,7 +433,7 @@ export default function App() {
             >
               <Globe className="h-3.5 w-3.5 text-fuchsia-300" />
               <span className="hidden md:inline font-mono">
-                e72c-46-251-215-68.ngrok-free.app
+                {API_BASE_URL.replace(/^https?:\/\//, '')}
               </span>
               <ExternalLink className="h-3 w-3 text-zinc-400" />
             </a>
