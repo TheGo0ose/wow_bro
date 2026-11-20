@@ -69,12 +69,17 @@ if count >= send_limit then
     return {429, 'RATE_LIMITED_SEND_10M', retry_sec}
 end
 
-if count > 0 then
-    local last_sent_ms = tonumber(entries[#entries])
+local send_seq = tonumber(redis.call('HGET', otp_key, 'send_seq')) or 0
+local last_sent_ms = tonumber(redis.call('HGET', otp_key, 'last_sent_ms'))
+if last_sent_ms and (now_ms - last_sent_ms >= send_window_ms) then
+    send_seq = 0
+end
+
+if send_seq > 0 and last_sent_ms then
     local cooldown_ms = c3_ms
-    if count == 1 then
+    if send_seq == 1 then
         cooldown_ms = c1_ms
-    elseif count == 2 then
+    elseif send_seq == 2 then
         cooldown_ms = c2_ms
     end
     local elapsed_ms = now_ms - last_sent_ms
@@ -86,6 +91,8 @@ end
 
 local now_str = string.format('%.0f', now_ms)
 local expires_str = string.format('%.0f', now_ms + otp_ttl_ms)
+local next_seq = send_seq + 1
+local otp_key_ttl = math.max(key_ttl_sec, math.ceil(send_window_ms / 1000))
 redis.call('ZADD', send_hist_key, now_ms, now_str .. ':' .. req_id)
 redis.call('EXPIRE', send_hist_key, key_ttl_sec)
 redis.call(
@@ -94,9 +101,11 @@ redis.call(
     'hash', otp_hash,
     'expires_at_ms', expires_str,
     'status', 'active',
-    'created_at_ms', now_str
+    'created_at_ms', now_str,
+    'send_seq', tostring(next_seq),
+    'last_sent_ms', now_str
 )
-redis.call('EXPIRE', otp_key, key_ttl_sec)
+redis.call('EXPIRE', otp_key, otp_key_ttl)
 
 return {200, 'OTP_SENT', 0}
 """

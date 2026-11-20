@@ -33,6 +33,7 @@ services:
       SEND_WINDOW_SECONDS: ${SEND_WINDOW_SECONDS:-600}
       TELECOM_GATEWAY_URL: http://telecom-gateway:1401
       TELECOM_ENABLED: ${TELECOM_ENABLED:-auto}
+      TEST_MODE: ${TEST_MODE:-true}
     volumes:
       - ./outbox:/app/outbox
     depends_on:
