@@ -9,9 +9,10 @@ from pathlib import Path
 
 from coverage.errors import DataError
 from coverage.pipeline import InputPaths, run_analysis
-from coverage.report import build_result, format_summary, write_result
+from coverage.report import build_bonus, build_result, format_summary, write_result
 
 RESULT_FILENAME = "result.json"
+BONUS_FILENAME = "bonus.json"
 MAP_FILENAME = "coverage_map.html"
 
 
@@ -63,10 +64,13 @@ def main(argv: list[str] | None = None) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     result_path = args.out / RESULT_FILENAME
     write_result(build_result(analysis), result_path)
+    bonus_path = args.out / BONUS_FILENAME
+    write_result(build_bonus(analysis), bonus_path)
 
     print(format_summary(analysis))
     print()
     print(f"result.json: {result_path}")
+    print(f"Бонусная аналитика: {bonus_path}")
 
     if not args.no_map:
         # Imported lazily so result.json is produced even if folium is unavailable.

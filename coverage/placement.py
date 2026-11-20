@@ -102,3 +102,41 @@ def best_pair(coverage: Mapping[str, frozenset[str]]) -> Placement:
 
     assert best is not None
     return Placement(site_ids=best.site_ids, covered_cells=best.covered_cells, pairs_checked=checked)
+
+
+@dataclass(frozen=True)
+class GreedyStep:
+    site_id: str
+    new_cells: int  # weak cells this pick added on top of the previous picks
+
+
+@dataclass(frozen=True)
+class GreedyPlacement:
+    steps: tuple[GreedyStep, ...]
+    covered_cells: frozenset[str]
+
+    @property
+    def site_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(step.site_id for step in self.steps))
+
+    @property
+    def covered_count(self) -> int:
+        return len(self.covered_cells)
+
+
+def greedy_sites(coverage: Mapping[str, frozenset[str]], count: int = 2) -> GreedyPlacement:
+    """Bonus baseline: repeatedly take the site that adds the most uncovered cells.
+
+    Fast (count * n checks instead of all combinations) but not guaranteed optimal:
+    a strong first pick may overlap with every good second pick.
+    Ties go to the smallest ID, as in the exhaustive search.
+    """
+    remaining = sorted(coverage)
+    covered: frozenset[str] = frozenset()
+    steps: list[GreedyStep] = []
+    for _ in range(min(count, len(remaining))):
+        pick = max(remaining, key=lambda sid: (len(coverage[sid] - covered), -remaining.index(sid)))
+        steps.append(GreedyStep(site_id=pick, new_cells=len(coverage[pick] - covered)))
+        covered |= coverage[pick]
+        remaining.remove(pick)
+    return GreedyPlacement(steps=tuple(steps), covered_cells=covered)

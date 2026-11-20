@@ -1,6 +1,6 @@
 from coverage.geo import LocalGrid
 from coverage.grid import Cell
-from coverage.placement import best_pair, check_eligibility, coverage_sets
+from coverage.placement import best_pair, check_eligibility, coverage_sets, greedy_sites
 from coverage.sites import Site
 
 GRID = LocalGrid(origin_lat=42.84, origin_lon=74.56, cell_size_m=200)
@@ -68,3 +68,27 @@ def test_best_pair_tie_goes_to_smallest_ids():
 def test_best_pair_with_fewer_than_two_candidates():
     assert best_pair({"C1": frozenset({"a"})}).site_ids == ("C1",)
     assert best_pair({}).site_ids == ()
+
+
+def test_greedy_can_miss_the_optimum():
+    # C1 is the best single site but overlaps both others; C2 + C3 together are better.
+    coverage = {
+        "C1": frozenset({"a", "b", "c", "d"}),
+        "C2": frozenset({"a", "b", "x"}),
+        "C3": frozenset({"c", "d", "y"}),
+    }
+    greedy = greedy_sites(coverage)
+    assert [s.site_id for s in greedy.steps] == ["C1", "C2"]
+    assert [s.new_cells for s in greedy.steps] == [4, 1]
+    assert greedy.covered_count == 5
+    assert best_pair(coverage).covered_count == 6
+
+
+def test_greedy_tie_goes_to_smallest_id():
+    coverage = {"C3": frozenset({"a"}), "C1": frozenset({"b"}), "C2": frozenset({"c"})}
+    assert greedy_sites(coverage).site_ids == ("C1", "C2")
+
+
+def test_greedy_with_too_few_candidates():
+    assert greedy_sites({"C1": frozenset({"a"})}).site_ids == ("C1",)
+    assert greedy_sites({}).covered_count == 0

@@ -1,15 +1,24 @@
-"""Interactive HTML coverage map built with folium (Leaflet)."""
+"""Interactive HTML coverage map built with folium (Leaflet).
+
+Layer control has two groups:
+  * "Слой покрытия" — one at a time (radio): all data, day, night, night-minus-day, heatmap;
+  * "Объекты" — checkboxes: worst cells, sparse cells, towers, candidates, chosen sites.
+"""
 
 from __future__ import annotations
 
 import html
 from pathlib import Path
+from typing import Iterable
 
 import folium
+from folium.plugins import GroupedLayerControl, HeatMap
 
 from coverage.grid import Cell, Level
 from coverage.placement import COVERAGE_RADIUS_M
 from coverage.pipeline import Analysis
+from coverage.sites import Site
+from coverage.timeofday import DAY_START_HOUR, NIGHT_START_HOUR, CellChange
 
 LEVEL_COLORS = {
     Level.GOOD: "#2e9d4f",
@@ -21,18 +30,30 @@ LEVEL_LABELS = {
     Level.FAIR: "−105…−90 дБм — среднее",
     Level.WEAK: "< −105 дБм — слабая зона",
 }
+LEVEL_NAMES = {Level.GOOD: "зелёный", Level.FAIR: "жёлтый", Level.WEAK: "красный"}
 SPARSE_COLOR = "#9e9e9e"
-CHOSEN_COLOR = "#6a1b9a"
+EXACT_COLOR = "#6a1b9a"
+GREEDY_COLOR = "#ef6c00"
+BETTER_AT_NIGHT = "#1e88e5"
+WORSE_AT_NIGHT = "#e65100"
+DELTA_FULL_SCALE_DB = 10.0  # |night - day| at which the delta colour is fully opaque
+
+# Heatmap weight: 0 at -90 dBm (good signal) up to 1 at -120 dBm and below.
+HEAT_ZERO_DBM = -90.0
+HEAT_FULL_DBM = -120.0
+
+COVERAGE_GROUP = "Слой покрытия"
+OBJECTS_GROUP = "Объекты"
 
 
 def _cell_tooltip(cell: Cell) -> str:
     return f"{cell.cell_id}: медиана {cell.median_dbm:g} дБм, замеров {cell.samples}"
 
 
-def _add_cells(fmap: folium.Map, analysis: Analysis) -> None:
+def _cells_layer(analysis: Analysis, name: str, cells: Iterable[Cell], show: bool) -> folium.FeatureGroup:
     grid = analysis.bounds.grid
-    layer = folium.FeatureGroup(name="Квадраты 200×200 м (медиана RSRP)")
-    for cell in analysis.grid.cells:
+    layer = folium.FeatureGroup(name=name, show=show)
+    for cell in cells:
         color = LEVEL_COLORS[cell.level]
         folium.Rectangle(
             bounds=list(grid.cell_corners(cell.ix, cell.iy)),
@@ -43,9 +64,48 @@ def _add_cells(fmap: folium.Map, analysis: Analysis) -> None:
             fill_opacity=0.55,
             tooltip=_cell_tooltip(cell),
         ).add_to(layer)
-    layer.add_to(fmap)
+    return layer
 
-    sparse = folium.FeatureGroup(name="Мало замеров (< 5), не учитываются", show=False)
+
+def _delta_layer(analysis: Analysis, changes: Iterable[CellChange]) -> folium.FeatureGroup:
+    grid = analysis.bounds.grid
+    layer = folium.FeatureGroup(name="Разница ночь − день", show=False)
+    for change in changes:
+        delta = change.delta_db
+        color = BETTER_AT_NIGHT if delta > 0 else WORSE_AT_NIGHT
+        strength = min(1.0, abs(delta) / DELTA_FULL_SCALE_DB)
+        tooltip = (
+            f"{change.cell_id}: день {change.day.median_dbm:g} дБм ({LEVEL_NAMES[change.day.level]}), "
+            f"ночь {change.night.median_dbm:g} дБм ({LEVEL_NAMES[change.night.level]}), "
+            f"разница {delta:+.1f} дБм"
+        )
+        folium.Rectangle(
+            bounds=list(grid.cell_corners(change.day.ix, change.day.iy)),
+            color="#555555" if change.level_shift else color,
+            weight=2 if change.level_shift else 0.5,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.1 + 0.7 * strength,
+            tooltip=tooltip,
+        ).add_to(layer)
+    return layer
+
+
+def _heat_layer(analysis: Analysis) -> folium.FeatureGroup:
+    layer = folium.FeatureGroup(name="Тепловая карта слабого сигнала", show=False)
+    span = HEAT_ZERO_DBM - HEAT_FULL_DBM
+    points = [
+        [m.lat, m.lon, min(1.0, (HEAT_ZERO_DBM - m.rsrp_dbm) / span)]
+        for m in analysis.cleaning.measurements
+        if m.rsrp_dbm < HEAT_ZERO_DBM
+    ]
+    HeatMap(points, radius=18, blur=22, min_opacity=0.3, max_zoom=16).add_to(layer)
+    return layer
+
+
+def _sparse_layer(analysis: Analysis) -> folium.FeatureGroup:
+    grid = analysis.bounds.grid
+    layer = folium.FeatureGroup(name="Мало замеров (< 5), не учитываются", show=False)
     for cell in analysis.grid.sparse_cells:
         folium.Rectangle(
             bounds=list(grid.cell_corners(cell.ix, cell.iy)),
@@ -55,10 +115,13 @@ def _add_cells(fmap: folium.Map, analysis: Analysis) -> None:
             fill=True,
             fill_opacity=0.2,
             tooltip=_cell_tooltip(cell),
-        ).add_to(sparse)
-    sparse.add_to(fmap)
+        ).add_to(layer)
+    return layer
 
-    worst = folium.FeatureGroup(name="Топ-3 худших квадрата")
+
+def _worst_layer(analysis: Analysis) -> folium.FeatureGroup:
+    grid = analysis.bounds.grid
+    layer = folium.FeatureGroup(name="Топ-3 худших квадрата")
     for rank, cell in enumerate(analysis.worst, start=1):
         folium.Rectangle(
             bounds=list(grid.cell_corners(cell.ix, cell.iy)),
@@ -66,29 +129,31 @@ def _add_cells(fmap: folium.Map, analysis: Analysis) -> None:
             weight=3,
             fill=False,
             tooltip=f"#{rank} худший — {_cell_tooltip(cell)}",
-        ).add_to(worst)
+        ).add_to(layer)
         folium.Marker(
             location=(cell.center_lat, cell.center_lon),
             icon=folium.DivIcon(
                 html=f'<div style="font:bold 13px sans-serif;color:#fff;'
                 f'text-shadow:0 0 3px #000;transform:translate(-4px,-8px)">{rank}</div>'
             ),
-        ).add_to(worst)
-    worst.add_to(fmap)
+        ).add_to(layer)
+    return layer
 
 
-def _add_sites(fmap: folium.Map, analysis: Analysis) -> None:
-    towers = folium.FeatureGroup(name="Существующие БС")
+def _towers_layer(analysis: Analysis) -> folium.FeatureGroup:
+    layer = folium.FeatureGroup(name="Существующие БС")
     for tower in analysis.towers:
         folium.Marker(
             location=(tower.lat, tower.lon),
             tooltip=f"БС {tower.id}",
             icon=folium.Icon(color="blue", icon="wifi", prefix="fa"),
-        ).add_to(towers)
-    towers.add_to(fmap)
+        ).add_to(layer)
+    return layer
 
+
+def _candidates_layer(analysis: Analysis) -> folium.FeatureGroup:
+    layer = folium.FeatureGroup(name="Площадки-кандидаты")
     chosen_ids = set(analysis.placement.site_ids)
-    candidates = folium.FeatureGroup(name="Площадки-кандидаты")
     for cand in analysis.candidates:
         if cand.id in chosen_ids:
             continue
@@ -109,56 +174,80 @@ def _add_sites(fmap: folium.Map, analysis: Analysis) -> None:
             fill_color=fill,
             fill_opacity=0.9,
             tooltip=tooltip,
-        ).add_to(candidates)
-    candidates.add_to(fmap)
+        ).add_to(layer)
+    return layer
 
-    chosen = folium.FeatureGroup(name="Выбранные площадки и радиус 1 км")
-    by_id = {cand.id: cand for cand in analysis.candidates}
-    for site_id in analysis.placement.site_ids:
+
+def _sites_layer(
+    analysis: Analysis,
+    name: str,
+    site_ids: Iterable[str],
+    color: str,
+    icon_color: str,
+    label: str,
+    show: bool,
+    dashed: bool = False,
+) -> folium.FeatureGroup:
+    layer = folium.FeatureGroup(name=name, show=show)
+    by_id: dict[str, Site] = {cand.id: cand for cand in analysis.candidates}
+    for site_id in site_ids:
         cand = by_id[site_id]
         covered = len(analysis.coverage.get(site_id, ()))
         folium.Circle(
             location=(cand.lat, cand.lon),
             radius=COVERAGE_RADIUS_M,
-            color=CHOSEN_COLOR,
+            color=color,
             weight=2,
+            dash_array="8 6" if dashed else None,
             fill=True,
-            fill_opacity=0.08,
-        ).add_to(chosen)
+            fill_opacity=0.06,
+        ).add_to(layer)
         folium.Marker(
             location=(cand.lat, cand.lon),
-            tooltip=f"Новая БС {site_id}: покрывает {covered} красных квадратов",
-            icon=folium.Icon(color="purple", icon="star", prefix="fa"),
-        ).add_to(chosen)
-    chosen.add_to(fmap)
+            tooltip=f"{label} {site_id}: покрывает {covered} красных квадратов",
+            icon=folium.Icon(color=icon_color, icon="star", prefix="fa"),
+        ).add_to(layer)
+    return layer
+
+
+def _swatch(color: str, label: str) -> str:
+    return (
+        f'<div><span style="display:inline-block;width:14px;height:14px;background:{color};'
+        f'margin-right:6px;vertical-align:middle"></span>{html.escape(label)}</div>'
+    )
 
 
 def _legend_html(analysis: Analysis) -> str:
-    placement = analysis.placement
+    exact, greedy, dn = analysis.placement, analysis.greedy, analysis.day_night
     weak_total = len(analysis.grid.weak_cells)
-    rows = "".join(
-        f'<div><span style="display:inline-block;width:14px;height:14px;'
-        f'background:{LEVEL_COLORS[level]};margin-right:6px;vertical-align:middle"></span>'
-        f"{html.escape(LEVEL_LABELS[level])}</div>"
-        for level in Level
-    )
-    pair = " + ".join(placement.site_ids) or "—"
+    levels = "".join(_swatch(LEVEL_COLORS[level], LEVEL_LABELS[level]) for level in Level)
+    delta = dn.median_delta_db
+    delta_text = f"{delta:+.1f} дБм" if delta is not None else "нет данных"
     return f"""
     <div style="position:fixed;bottom:24px;left:12px;z-index:9999;background:#fff;
                 padding:10px 12px;border-radius:6px;box-shadow:0 1px 6px rgba(0,0,0,.3);
-                font:13px/1.5 sans-serif;color:#222;max-width:280px">
+                font:13px/1.5 sans-serif;color:#222;max-width:300px">
       <div style="font-weight:bold;margin-bottom:4px">Покрытие района (RSRP, медиана)</div>
-      {rows}
+      {levels}
       <hr style="margin:6px 0;border:none;border-top:1px solid #ddd">
       <div>Отброшено строк: <b>{analysis.cleaning.dropped_rows}</b></div>
-      <div>Новые БС: <b>{html.escape(pair)}</b></div>
-      <div>Покрыто слабых квадратов: <b>{placement.covered_count}</b> из {weak_total}</div>
+      <div>Новые БС: <b>{html.escape(' + '.join(exact.site_ids) or '—')}</b>,
+           покрыто <b>{exact.covered_count}</b> из {weak_total} слабых</div>
+      <div style="color:{GREEDY_COLOR}">Жадный: {html.escape(' + '.join(greedy.site_ids) or '—')}
+           → {greedy.covered_count}</div>
+      <hr style="margin:6px 0;border:none;border-top:1px solid #ddd">
+      <div>День {DAY_START_HOUR:02d}–{NIGHT_START_HOUR:02d}: красных {len(dn.day.weak_cells)};
+           ночь: {len(dn.night.weak_cells)}</div>
+      <div>Ночь − день (медиана): <b>{delta_text}</b></div>
+      {_swatch(BETTER_AT_NIGHT, "ночью лучше")}
+      {_swatch(WORSE_AT_NIGHT, "ночью хуже (рамка — сменился цвет)")}
     </div>
     """
 
 
 def build_map(analysis: Analysis) -> folium.Map:
     b = analysis.bounds
+    dn = analysis.day_night
     # Note: OpenStreetMap refuses tiles when the HTML is opened from disk (file://, no
     # Referer). Serve the map over http(s), e.g. GitHub Pages or `python -m http.server`.
     fmap = folium.Map(location=b.center, zoom_start=14, control_scale=True, tiles="OpenStreetMap")
@@ -170,10 +259,36 @@ def build_map(analysis: Analysis) -> folium.Map:
         tooltip="Граница района",
     ).add_to(fmap)
 
-    _add_cells(fmap, analysis)
-    _add_sites(fmap, analysis)
+    coverage_layers = [
+        _cells_layer(analysis, "Все замеры", analysis.grid.cells, show=True),
+        _cells_layer(analysis, f"День {DAY_START_HOUR:02d}:00–{NIGHT_START_HOUR:02d}:00",
+                     dn.day.cells, show=False),
+        _cells_layer(analysis, f"Ночь {NIGHT_START_HOUR:02d}:00–{DAY_START_HOUR:02d}:00",
+                     dn.night.cells, show=False),
+        _delta_layer(analysis, dn.common),
+        _heat_layer(analysis),
+    ]
+    object_layers = [
+        _worst_layer(analysis),
+        _sparse_layer(analysis),
+        _towers_layer(analysis),
+        _candidates_layer(analysis),
+        _sites_layer(analysis, f"Полный перебор: {' + '.join(analysis.placement.site_ids)}",
+                     analysis.placement.site_ids, EXACT_COLOR, "purple", "Новая БС", show=True),
+        _sites_layer(analysis, f"Жадный: {' + '.join(analysis.greedy.site_ids)}",
+                     analysis.greedy.site_ids, GREEDY_COLOR, "orange", "Жадный выбор",
+                     show=False, dashed=True),
+    ]
+    for layer in coverage_layers + object_layers:
+        layer.add_to(fmap)
+
+    GroupedLayerControl(
+        groups={COVERAGE_GROUP: coverage_layers, OBJECTS_GROUP: object_layers},
+        exclusive_groups=False,
+        exclusiveGroups=[COVERAGE_GROUP],  # radio buttons for the coverage group only
+        collapsed=False,
+    ).add_to(fmap)
     fmap.get_root().html.add_child(folium.Element(_legend_html(analysis)))
-    folium.LayerControl(collapsed=False).add_to(fmap)
     fmap.fit_bounds([(b.lat_min, b.lon_min), (b.lat_max, b.lon_max)])
     return fmap
 

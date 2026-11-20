@@ -5,11 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from coverage.cleaning import CleaningResult, load_measurements
+from coverage.cleaning import CleaningResult, load_measurements, resolve_timezone
 from coverage.config import Bounds, load_bounds
 from coverage.grid import Cell, GridResult, build_grid, worst_cells
-from coverage.placement import Eligibility, Placement, best_pair, check_eligibility, coverage_sets
+from coverage.placement import (
+    Eligibility,
+    GreedyPlacement,
+    Placement,
+    best_pair,
+    check_eligibility,
+    coverage_sets,
+    greedy_sites,
+)
 from coverage.sites import Site, load_sites
+from coverage.timeofday import DayNightComparison, compare_day_night
 
 WORST_CELLS_COUNT = 3
 
@@ -43,6 +52,9 @@ class Analysis:
     eligibility: Eligibility
     coverage: dict[str, frozenset[str]]  # allowed candidate id -> covered weak cell ids
     placement: Placement
+    # bonuses
+    greedy: GreedyPlacement
+    day_night: DayNightComparison
 
 
 def run_analysis(paths: InputPaths) -> Analysis:
@@ -65,4 +77,8 @@ def run_analysis(paths: InputPaths) -> Analysis:
         eligibility=eligibility,
         coverage=coverage,
         placement=best_pair(coverage),
+        greedy=greedy_sites(coverage),
+        day_night=compare_day_night(
+            cleaning.measurements, bounds.grid, resolve_timezone(bounds.timezone)
+        ),
     )

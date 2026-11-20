@@ -6,7 +6,7 @@ from conftest import DATA_DIR
 
 from coverage.cli import main
 from coverage.pipeline import InputPaths, run_analysis
-from coverage.report import build_result
+from coverage.report import build_bonus, build_result
 
 
 def test_open_data_matches_expected():
@@ -32,3 +32,19 @@ def test_cli_writes_result_and_map(tmp_path):
 
 def test_cli_reports_missing_data(tmp_path):
     assert main(["--data", str(tmp_path / "missing"), "--out", str(tmp_path)]) == 2
+
+
+def test_bonus_on_open_data():
+    bonus = build_bonus(run_analysis(InputPaths.from_dir(DATA_DIR)))
+    greedy = bonus["greedy_vs_bruteforce"]
+    assert greedy["bruteforce"]["pair"] == ["C09", "C14"]
+    assert greedy["greedy"]["pair"] == ["C16", "C17"]
+    assert greedy["greedy_loss_cells"] == 3
+    day_night = bonus["day_vs_night"]
+    assert day_night["day"]["measurements"] + day_night["night"]["measurements"] == 4800
+
+
+def test_cli_writes_bonus(tmp_path):
+    assert main(["--data", str(DATA_DIR), "--out", str(tmp_path), "--no-map"]) == 0
+    assert (tmp_path / "bonus.json").exists()
+    assert not (tmp_path / "coverage_map.html").exists()
