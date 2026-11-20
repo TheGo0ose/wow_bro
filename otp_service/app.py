@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from typing import Any
 
@@ -71,8 +72,13 @@ def create_app(settings: Settings | None = None, service: OtpService | None = No
         return peer
 
     def require_loopback(request: Request) -> None:
+        """Служебные методы: только в тестовом режиме и только с loopback (127.0.0.0/8, ::1)."""
         peer = request.client.host if request.client else ""
-        if not settings.test_mode or peer not in settings.trusted_proxies:
+        try:
+            local = ipaddress.ip_address(peer).is_loopback
+        except ValueError:
+            local = peer == "testclient"
+        if not settings.test_mode or not local:
             raise HTTPException(status_code=404)
 
     # Ошибки фреймворка тоже отдаём в виде JSON.

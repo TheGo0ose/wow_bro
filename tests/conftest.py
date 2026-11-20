@@ -96,8 +96,8 @@ def _free_port() -> int:
 def live_server(request, tmp_path_factory):
     """Настоящий HTTP-сервер (uvicorn в потоке) в тестовом режиме — на каждом хранилище."""
     tmp = tmp_path_factory.mktemp(f"live-{request.param}")
-    settings = make_settings(tmp, test_mode=True, trusted_ip_header="X-Test-Client-IP",
-                             test_start_time=START, storage=request.param)
+    # Без доверенного заголовка: IP только из соединения, как в режиме жюри.
+    settings = make_settings(tmp, test_mode=True, test_start_time=START, storage=request.param)
     redis_client = fake_redis() if request.param == "redis" else None
     app = create_app(settings, service=build_service(settings, redis_client))
     port = _free_port()

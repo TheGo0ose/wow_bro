@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scenario_runner import load_scenarios, run_scenario
+from scenario_runner import DEFAULT_IP_MAP, RunConfig, load_scenarios, parse_ip_map, run_scenario
 
 SCENARIOS_DIR = Path(__file__).resolve().parent.parent / "scenarios"
 ALL = load_scenarios([SCENARIOS_DIR / "scenarios_examples.json",
@@ -15,7 +15,11 @@ ALL = load_scenarios([SCENARIOS_DIR / "scenarios_examples.json",
 
 @pytest.mark.parametrize("scenario", ALL, ids=[s["id"] for s in ALL])
 def test_scenario(live_server, scenario):
-    result = run_scenario(live_server["base_url"], live_server["outbox"], scenario)
+    # Как у жюри: client_ip из сценария -> реальный адрес источника (127.0.0.1 / 127.0.0.2),
+    # сервис берёт IP только из соединения, никаких заголовков.
+    cfg = RunConfig(live_server["base_url"], live_server["outbox"], real_time=False,
+                    ip_mode="source", ip_map=parse_ip_map(DEFAULT_IP_MAP))
+    result = run_scenario(cfg, scenario)
     assert result.passed, "\n".join(result.failures)
 
 
