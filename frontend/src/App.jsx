@@ -1,20 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
-  Check,
+  ExternalLink,
   Globe,
   RotateCcw,
-  Settings2,
   Shield,
   ShieldCheck,
 } from 'lucide-react';
 import RegistrationPanel from './components/RegistrationPanel';
 import CelebrationPage from './components/CelebrationPage';
 import {
+  API_BASE_URL,
   checkOtpHealth,
-  getApiBaseUrl,
   resetTestLimits,
-  saveApiBaseUrl,
   sendOtp,
   verifyOtp,
 } from './api/client';
@@ -35,10 +33,6 @@ const PROGRESSIVE_COOLDOWNS = [30, 60, 120];
 const DEFAULT_LOCKOUT_SECONDS = 15 * 60;
 
 export default function App() {
-  const [apiBaseUrl, setApiBaseUrl] = useState(() => getApiBaseUrl());
-  const [isEditingApi, setIsEditingApi] = useState(false);
-  const [apiDraft, setApiDraft] = useState(apiBaseUrl);
-
   const [healthState, setHealthState] = useState({
     status: 'idle',
     detail: 'Статус защиты OTP',
@@ -165,15 +159,6 @@ export default function App() {
     }, 1000);
     return () => clearInterval(timer);
   }, [lockoutSeconds]);
-
-  const handleSaveApiUrl = (e) => {
-    e.preventDefault();
-    const saved = saveApiBaseUrl(apiDraft);
-    setApiBaseUrl(saved);
-    setApiDraft(saved);
-    setIsEditingApi(false);
-    handleCheckHealth();
-  };
 
   const dispatchOtpSend = async (draft) => {
     setIsLoading(true);
@@ -439,37 +424,19 @@ export default function App() {
               <span className="hidden sm:inline">Reset</span>
             </button>
 
-            {isEditingApi ? (
-              <form onSubmit={handleSaveApiUrl} className="flex items-center gap-1.5">
-                <input
-                  type="url"
-                  value={apiDraft}
-                  onChange={(e) => setApiDraft(e.target.value)}
-                  placeholder="http://172.20.10.3:8000"
-                  className="w-48 rounded-xl border border-fuchsia-400/40 bg-black/50 px-2.5 py-1.5 font-mono text-xs text-white focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
-                >
-                  <Check className="h-3.5 w-3.5" />
-                </button>
-              </form>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setApiDraft(apiBaseUrl);
-                  setIsEditingApi(true);
-                }}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-white/10 cursor-pointer"
-                title="Изменить URL OTP Shield"
-              >
-                <Globe className="h-3.5 w-3.5 text-fuchsia-300" />
-                <span className="hidden sm:inline font-mono">{apiBaseUrl}</span>
-                <Settings2 className="h-3.5 w-3.5 text-zinc-400" />
-              </button>
-            )}
+            <a
+              href={API_BASE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-white/10 hover:text-white"
+              title="Открыть бэкенд OTP Shield"
+            >
+              <Globe className="h-3.5 w-3.5 text-fuchsia-300" />
+              <span className="hidden md:inline font-mono">
+                e72c-46-251-215-68.ngrok-free.app
+              </span>
+              <ExternalLink className="h-3 w-3 text-zinc-400" />
+            </a>
           </div>
         </div>
       </header>

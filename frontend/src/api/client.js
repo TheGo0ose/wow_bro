@@ -1,33 +1,15 @@
 import { normalizeMsisdn } from '../utils/phoneMask';
 
-const STORAGE_KEY = 'external_api_base_url';
-const DEFAULT_API_BASE_URL =
-  import.meta.env.VITE_OTP_API_URL ||
-  import.meta.env.VITE_API_BASE_URL ||
-  'http://172.20.10.3:8000';
+/**
+ * Постоянный базовый URL бэкенда OTP Shield (через ngrok).
+ * Используется всегда при любых запросах с фронтенда.
+ */
+export const API_BASE_URL = 'https://e72c-46-251-215-68.ngrok-free.app';
 
 const REQUEST_TIMEOUT_MS = 5000;
 
 export function getApiBaseUrl() {
-  try {
-    return localStorage.getItem(STORAGE_KEY) || DEFAULT_API_BASE_URL;
-  } catch {
-    return DEFAULT_API_BASE_URL;
-  }
-}
-
-export function saveApiBaseUrl(url) {
-  const normalized = url.trim().replace(/\/+$/, '');
-  try {
-    if (normalized) {
-      localStorage.setItem(STORAGE_KEY, normalized);
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  } catch {
-    // Ignore storage errors
-  }
-  return normalized || DEFAULT_API_BASE_URL;
+  return API_BASE_URL;
 }
 
 /**
@@ -87,7 +69,9 @@ async function requestJson(method, path, body, token) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  const headers = {};
+  const headers = {
+    'ngrok-skip-browser-warning': 'true',
+  };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
@@ -120,8 +104,8 @@ async function requestJson(method, path, body, token) {
       expiresIn: 120,
       data: null,
       error: isTimeout
-        ? `Превышен таймаут ожидания (5 сек) от ${baseUrl}. Проверьте Wi-Fi сеть.`
-        : `Не удалось подключиться к OTP Shield (${baseUrl}). Проверьте IP и соединение.`,
+        ? `Превышен таймаут ожидания (5 сек) от ${baseUrl}.`
+        : `Не удалось подключиться к OTP Shield (${baseUrl}). Проверьте доступность ngrok-туннеля.`,
     };
   } finally {
     clearTimeout(timeoutId);
