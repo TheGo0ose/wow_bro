@@ -1,0 +1,13 @@
+services:
+  otp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # В реальном развёртывании задайте свой секрет: OTP_SECRET=... docker compose up
+      OTP_SECRET: ${OTP_SECRET:-change-me-hackathon-secret}
+      OTP_TEST_MODE: ${OTP_TEST_MODE:-0}
+    volumes:
+      # outbox/sms.jsonl и logs/security.jsonl видны на хосте в корне репозитория
+      - ./outbox:/app/outbox
+      - ./logs:/app/logs
