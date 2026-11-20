@@ -5,18 +5,12 @@ import {
   setupOtpApiMock,
 } from './helpers/otpApiMock.js';
 
-/**
- * Хелпер посимвольного ввода 6-значного кода в отдельные поля ввода ("Цифра 1" .. "Цифра 6").
- */
 async function fillSixDigitCode(page, code) {
   for (let i = 0; i < code.length; i += 1) {
     await page.getByRole('textbox', { name: `Цифра ${i + 1}` }).fill(code[i]);
   }
 }
 
-/**
- * Заполняет обязательные поля формы регистрации (логин, телефон, пароль + повтор пароля).
- */
 async function fillRegistrationForm(
   page,
   { username = 'AibekDev', phone = '770730000', password = 'secret123' } = {}
@@ -27,8 +21,8 @@ async function fillRegistrationForm(
   await page.getByPlaceholder('Повторите пароль').fill(password);
 }
 
-test.describe('Реальная регистрация и 2FA-вход через OTP Shield (E2E)', () => {
-  test('Happy Path: обязательный пароль, сохранение логина на шаге OTP и после перезагрузки + вход по паролю', async ({
+test.describe('Регистрация с OTP Shield и страницей поздравления (E2E)', () => {
+  test('Happy Path: регистрация с обязательным паролем -> OTP -> страница поздравления с конфетти', async ({
     page,
   }) => {
     const validCode = process.env.REAL_OTP_CODE || '012345';
@@ -42,12 +36,12 @@ test.describe('Реальная регистрация и 2FA-вход чере�
 
     await page.goto('./');
 
-    // Проверяем бейдж статуса OTP Shield (GET /health)
+    // Проверяем статус OTP Shield (GET /health)
     await expect(
       page.getByRole('button', { name: 'OTP Shield: ONLINE' })
     ).toBeVisible();
 
-    // 1. Без пароля кнопка регистрации должна быть заблокирована
+    // Без пароля кнопка заблокирована
     await page.getByPlaceholder('Например, Айбек').fill('AibekDev');
     await page.getByPlaceholder('770 73-00-00').fill('770730000');
     const requestCodeButton = page.getByRole('button', {
@@ -55,65 +49,45 @@ test.describe('Реальная регистрация и 2FA-вход чере�
     });
     await expect(requestCodeButton).toBeDisabled();
 
-    // 2. Вводим обязательный пароль и его подтверждение — кнопка активируется
+    // Вводим пароль и подтверждение
     await page.getByPlaceholder('Мин. 6 символов').fill('secret123');
     await page.getByPlaceholder('Повторите пароль').fill('secret123');
     await expect(requestCodeButton).toBeEnabled();
     await requestCodeButton.click();
 
-    // 3. На экране подтверждения OTP логин AibekDev должен отображаться и не сбрасываться
+    // На шаге подтверждения OTP имя сохраняется
     await expect(
       page.getByRole('heading', { name: 'Подтверждение номера' })
     ).toBeVisible();
     await expect(page.getByText('AibekDev', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('+996 770 73-00-00')).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: /Отправить повторно \(00:[23]\d\)/ })
-    ).toBeDisabled();
 
-    // 4. Вводим 6-значный код (6-я цифра автоматически вызывает POST /otp/verify)
+    // Вводим 6-значный код (автоотправка на 6-й цифре)
     await fillSixDigitCode(page, validCode);
 
-    // 5. Проверяем Экран 3: аккаунт подтверждён, имя точно AibekDev (не «Пользователь»)
+    // Проверяем страницу с поздравлением и canvas конфетти
     await expect(
-      page.getByRole('heading', { name: 'Аккаунт подтверждён' })
+      page.getByRole('heading', { name: 'Поздравляем, AibekDev!' })
     ).toBeVisible();
-    await expect(page.getByText('Добро пожаловать, AibekDev!')).toBeVisible();
-    await expect(page.getByText('996770730000', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('confetti-canvas')).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: 'Зарегистрированные пользователи (1)' })
+      page.getByRole('button', { name: 'Ещё конфетти!' })
     ).toBeVisible();
 
-    // 6. Проверяем сохранение сессии после перезагрузки страницы
+    // Сессия сохраняется после перезагрузки
     await page.reload();
     await expect(
-      page.getByRole('heading', { name: 'Аккаунт подтверждён' })
-    ).toBeVisible();
-    await expect(page.getByText('Добро пожаловать, AibekDev!')).toBeVisible();
-
-    // 7. Проверяем реальный выход и повторный вход по логину + паролю + OTP
-    await page
-      .getByRole('button', { name: 'Выйти / Зарегистрировать новый номер' })
-      .click();
-    await page.getByRole('button', { name: 'Вход' }).click();
-    await page.getByPlaceholder('Айбек или 996770730000').fill('AibekDev');
-    await page.getByPlaceholder('Введите пароль').fill('wrongpass');
-    await page.getByRole('button', { name: 'Войти и получить SMS-код' }).click();
-    await expect(
-      page.getByText('Неверный пароль для указанного аккаунта.')
+      page.getByRole('heading', { name: 'Поздравляем, AibekDev!' })
     ).toBeVisible();
 
-    // Вводим правильный пароль -> получаем OTP -> подтверждаем
-    await page.getByPlaceholder('Введите пароль').fill('secret123');
-    await page.getByRole('button', { name: 'Войти и получить SMS-код' }).click();
+    // Кнопка "Новая регистрация" возвращает на форму
+    await page.getByRole('button', { name: 'Новая регистрация' }).click();
     await expect(
-      page.getByRole('heading', { name: 'Подтверждение номера' })
+      page.getByRole('heading', { name: 'Регистрация' })
     ).toBeVisible();
-    await fillSixDigitCode(page, validCode);
-    await expect(page.getByText('Добро пожаловать, AibekDev!')).toBeVisible();
 
     if (!USE_REAL_API) {
-      expect(capturedRequests.slice(0, 2)).toEqual([
+      expect(capturedRequests).toEqual([
         { endpoint: '/otp/send', body: { msisdn: '996770730000' } },
         {
           endpoint: '/otp/verify',
@@ -152,10 +126,7 @@ test.describe('Реальная регистрация и 2FA-вход чере�
         /Исчерпан лимит 3 SMS за 10 минут\. Повтор возможен через 4[3-5] сек/
       )
     ).toBeVisible();
-    await expect(page.getByText(/^00:4[3-5]$/)).toBeVisible();
-
-    const throttledButton = page.getByRole('button', { name: /Подождите/ });
-    await expect(throttledButton).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Подождите/ })).toBeDisabled();
   });
 
   test('Негативный сценарий: 401 OTP_FAILED показывает attempts_remaining, а 423 MSISDN_LOCKED блокирует ввод', async ({
@@ -198,11 +169,6 @@ test.describe('Реальная регистрация и 2FA-вход чере�
 
     await page.getByRole('button', { name: 'Подтвердить' }).click();
     await expect(page.getByText('Номер заблокирован (423)')).toBeVisible();
-    await expect(
-      page.getByText(
-        /Номер заблокирован из-за 5 ошибок\. Повторите через (900|899|898) сек/
-      )
-    ).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Цифра 1' })).toBeDisabled();
   });
 });

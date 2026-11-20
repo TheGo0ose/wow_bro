@@ -9,7 +9,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import RegistrationPanel from './components/RegistrationPanel';
-import BackendDemoPanel from './components/BackendDemoPanel';
+import CelebrationPage from './components/CelebrationPage';
 import {
   checkOtpHealth,
   getApiBaseUrl,
@@ -21,42 +21,32 @@ import {
 import {
   clearActiveSession,
   findAccountConflict,
-  findAccountForLogin,
   hashPassword,
-  loadAccounts,
   loadActiveSession,
   loadPendingRegistration,
-  removeAccountById,
   saveActiveSession,
   savePendingRegistration,
   upsertAccount,
 } from './utils/authStore';
-import { buildMsisdn, formatLogTime, isValidMsisdn } from './utils/phoneMask';
+import { buildMsisdn, isValidMsisdn } from './utils/phoneMask';
 
 const DEFAULT_OTP_TTL = 120;
 const PROGRESSIVE_COOLDOWNS = [30, 60, 120];
 const DEFAULT_LOCKOUT_SECONDS = 15 * 60;
 
 export default function App() {
-  // Настройка URL OTP Shield (VITE_OTP_API_URL=http://172.20.10.3:8000)
   const [apiBaseUrl, setApiBaseUrl] = useState(() => getApiBaseUrl());
   const [isEditingApi, setIsEditingApi] = useState(false);
   const [apiDraft, setApiDraft] = useState(apiBaseUrl);
 
-  // Статус GET /health
   const [healthState, setHealthState] = useState({
     status: 'idle',
     detail: 'Статус защиты OTP',
   });
   const [resetNotice, setResetNotice] = useState('');
 
-  // Реальные аккаунты и активная сессия
-  const [accounts, setAccounts] = useState(() => loadAccounts());
   const [activeUser, setActiveUser] = useState(() => loadActiveSession());
-
-  // Режим формы: регистрация / вход
-  const [authMode, setAuthMode] = useState('register'); // 'register' | 'login'
-  const [step, setStep] = useState(() => (loadActiveSession() ? 'success' : 'form'));
+  const [step, setStep] = useState(() => (loadActiveSession() ? 'celebration' : 'form'));
 
   // Поля формы регистрации
   const [username, setUsername] = useState('');
@@ -66,12 +56,7 @@ export default function App() {
   const [countryKey, setCountryKey] = useState('KG');
   const [phoneDigits, setPhoneDigits] = useState('');
 
-  // Поля формы входа
-  const [loginIdentifier, setLoginIdentifier] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-
-  // Снимок данных пользователя, ожидающего подтверждения OTP (сохраняется в ref + sessionStorage,
-  // чтобы логин НИКОГДА не сбрасывался на этапе ввода кода подтверждения!)
+  // Снимок данных пользователя на шаге ввода OTP (гарантирует сохранение логина)
   const [pendingAuth, setPendingAuth] = useState(() => loadPendingRegistration());
   const pendingAuthRef = useRef(pendingAuth);
 
@@ -96,38 +81,15 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [shakeKey, setShakeKey] = useState(0);
 
-  // Живой журнал реальных HTTP-запросов к бэкенду
-  const [httpLogs, setHttpLogs] = useState([]);
-
-  const recordHttpLog = useCallback((res) => {
-    const responsePreview = res.data
-      ? JSON.stringify(res.data)
-      : res.error || '';
-    setHttpLogs((prev) => [
-      {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        time: formatLogTime(),
-        method: res.method,
-        path: res.path,
-        status: res.status,
-        latencyMs: res.latencyMs,
-        requestBody: res.requestBody,
-        responsePreview,
-      },
-      ...prev.slice(0, 39),
-    ]);
-  }, []);
-
   const handleCheckHealth = useCallback(async () => {
     setHealthState({ status: 'checking', detail: 'Проверка /health...' });
     const res = await checkOtpHealth();
-    recordHttpLog(res);
     if (res.ok) {
       setHealthState({ status: 'online', detail: 'OTP Shield: ONLINE' });
     } else {
       setHealthState({ status: 'offline', detail: 'OTP Shield: OFFLINE' });
     }
-  }, [recordHttpLog]);
+  }, []);
 
   useEffect(() => {
     handleCheckHealth();
@@ -135,7 +97,6 @@ export default function App() {
 
   const handleTestReset = async () => {
     const res = await resetTestLimits();
-    recordHttpLog(res);
     if (res.ok) {
       setLockoutSeconds(0);
       setResendCooldown(0);
@@ -143,9 +104,9 @@ export default function App() {
       setErrorStatus(null);
       setErrorDetail(null);
       setErrorMessage('');
-      setResetNotice('Лимиты сброшены (/_test/reset)');
+      setResetNotice('Лимиты сброшены');
     } else {
-      setResetNotice('Не удалось вызвать /_test/reset');
+      setResetNotice('Ошибка /_test/reset');
     }
     setTimeout(() => setResetNotice(''), 3000);
   };
@@ -188,7 +149,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [resendCooldown, errorStatus]);
 
-  // Таймер 3: Блокировка номера 423 (MSISDN_LOCKED)
+  // Таймер 3: Блокировка номера 423
   useEffect(() => {
     if (lockoutSeconds <= 0) return;
     const timer = setInterval(() => {
@@ -214,7 +175,6 @@ export default function App() {
     handleCheckHealth();
   };
 
-  // Общая отправка POST /otp/send на OTP Shield
   const dispatchOtpSend = async (draft) => {
     setIsLoading(true);
     setErrorStatus(null);
@@ -222,7 +182,6 @@ export default function App() {
     setErrorMessage('');
 
     const res = await sendOtp(draft.msisdn);
-    recordHttpLog(res);
     setIsLoading(false);
 
     if (res.ok) {
@@ -262,7 +221,6 @@ export default function App() {
     setErrorMessage(res.error);
   };
 
-  // Шаг 1A: Реальная регистрация (обязательные логин, номер, пароль + проверка дубликатов)
   const handleSubmitRegister = async () => {
     if (isLoading || lockoutSeconds > 0 || resendCooldown > 0) return;
 
@@ -303,53 +261,14 @@ export default function App() {
     }
 
     const passwordHash = await hashPassword(password);
-    const draft = {
-      flow: 'register',
+    await dispatchOtpSend({
       username: cleanUsername,
       email: email.trim() || null,
       msisdn,
       passwordHash,
-    };
-
-    await dispatchOtpSend(draft);
+    });
   };
 
-  // Шаг 1B: Реальный вход (проверка логина/телефона + хэша пароля → 2FA через OTP Shield)
-  const handleSubmitLogin = async () => {
-    if (isLoading || lockoutSeconds > 0 || resendCooldown > 0) return;
-
-    const account = findAccountForLogin(loginIdentifier);
-    if (!account) {
-      setErrorStatus(404);
-      setErrorDetail('USER_NOT_FOUND');
-      setErrorMessage(
-        'Аккаунт не найден. Проверьте логин/телефон или сначала пройдите регистрацию.'
-      );
-      return;
-    }
-
-    const inputHash = await hashPassword(loginPassword);
-    if (inputHash !== account.passwordHash) {
-      setErrorStatus(401);
-      setErrorDetail('INVALID_PASSWORD');
-      setErrorMessage('Неверный пароль для указанного аккаунта.');
-      return;
-    }
-
-    const draft = {
-      flow: 'login',
-      accountId: account.id,
-      username: account.username,
-      email: account.email || null,
-      msisdn: account.msisdn,
-      passwordHash: account.passwordHash,
-      registeredAt: account.registeredAt,
-    };
-
-    await dispatchOtpSend(draft);
-  };
-
-  // Повторная отправка SMS на шаге 2
   const handleResendOtp = async () => {
     if (isLoading || lockoutSeconds > 0 || resendCooldown > 0) return;
     const draft = pendingAuthRef.current;
@@ -357,7 +276,6 @@ export default function App() {
     await dispatchOtpSend(draft);
   };
 
-  // Шаг 2: Подтверждение 6-значного кода через POST /otp/verify
   const handleVerifyCode = useCallback(
     async (explicitCode) => {
       if (isLoading || lockoutSeconds > 0 || otpCountdown <= 0) return;
@@ -373,30 +291,25 @@ export default function App() {
       setErrorMessage('');
 
       const res = await verifyOtp(msisdn, code);
-      recordHttpLog(res);
       setIsLoading(false);
 
       if (res.ok) {
-        const resolvedUsername =
-          (draft?.username || username || '').trim();
         const userRecord = {
-          id: draft?.accountId || `usr_${Date.now()}`,
-          username: resolvedUsername,
+          id: `usr_${Date.now()}`,
+          username: (draft?.username || username || '').trim(),
           email: draft?.email ?? (email.trim() || null),
           msisdn,
           passwordHash: draft?.passwordHash || '',
-          registeredAt: draft?.registeredAt || new Date().toISOString(),
+          registeredAt: new Date().toISOString(),
         };
 
-        const updatedAccounts = upsertAccount(userRecord);
-        setAccounts(updatedAccounts);
+        upsertAccount(userRecord);
         saveActiveSession(userRecord);
         setActiveUser(userRecord);
         updatePendingAuth(null);
         setPassword('');
         setConfirmPassword('');
-        setLoginPassword('');
-        setStep('success');
+        setStep('celebration');
         return;
       }
 
@@ -445,12 +358,11 @@ export default function App() {
       otpDigits,
       username,
       email,
-      recordHttpLog,
       updatePendingAuth,
     ]
   );
 
-  const handleLogout = () => {
+  const handleRegisterAnother = () => {
     clearActiveSession();
     updatePendingAuth(null);
     setActiveUser(null);
@@ -460,7 +372,6 @@ export default function App() {
     setPassword('');
     setConfirmPassword('');
     setPhoneDigits('');
-    setLoginPassword('');
     setOtpDigits(['', '', '', '', '', '']);
     setOtpTtlTotal(DEFAULT_OTP_TTL);
     setOtpCountdown(DEFAULT_OTP_TTL);
@@ -472,47 +383,25 @@ export default function App() {
     setErrorMessage('');
   };
 
-  const handleDeleteAccount = (id) => {
-    const next = removeAccountById(id);
-    setAccounts(next);
-    if (activeUser?.id === id) {
-      handleLogout();
-    }
-  };
-
-  const handleSelectAccountForLogin = (account) => {
-    clearActiveSession();
-    updatePendingAuth(null);
-    setActiveUser(null);
-    setAuthMode('login');
-    setStep('form');
-    setLoginIdentifier(account.username);
-    setLoginPassword('');
-    setErrorStatus(null);
-    setErrorDetail(null);
-    setErrorMessage('');
-  };
-
   return (
-    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_left,_#362a40_0%,_#181120_42%,_#060508_100%)] text-zinc-100 flex flex-col">
-      {/* Header */}
+    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_#362a40_0%,_#181120_48%,_#060508_100%)] text-zinc-100 flex flex-col">
+      {/* Компактная шапка */}
       <header className="border-b border-white/10 bg-black/25 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-fuchsia-400/30 bg-gradient-to-br from-fuchsia-500/25 to-violet-600/20">
-              <Shield className="h-5 w-5 text-fuchsia-300" />
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-fuchsia-400/30 bg-gradient-to-br from-fuchsia-500/25 to-violet-600/20">
+              <Shield className="h-4.5 w-4.5 text-fuchsia-300" />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight text-white">
-                OTP Shield · Демонстрация бэкенда
+              <h1 className="text-base font-bold tracking-tight text-white">
+                OTP Shield
               </h1>
-              <p className="text-xs text-zinc-400">
-                Реальная регистрация и 2FA-вход с защитой от brute-force и спама
+              <p className="text-[11px] text-zinc-400">
+                Регистрация с SMS-подтверждением
               </p>
             </div>
           </div>
 
-          {/* Управление подключением к OTP Shield */}
           <div className="flex flex-wrap items-center gap-2">
             {resetNotice && (
               <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300 animate-fade-in-soft">
@@ -544,27 +433,26 @@ export default function App() {
               type="button"
               onClick={handleTestReset}
               className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/10 hover:text-white cursor-pointer"
-              title="POST /_test/reset?flush=true — сбросить блокировки на сервере"
+              title="POST /_test/reset?flush=true — сбросить лимиты"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Reset Demo</span>
+              <span className="hidden sm:inline">Reset</span>
             </button>
 
             {isEditingApi ? (
-              <form onSubmit={handleSaveApiUrl} className="flex items-center gap-2">
+              <form onSubmit={handleSaveApiUrl} className="flex items-center gap-1.5">
                 <input
                   type="url"
                   value={apiDraft}
                   onChange={(e) => setApiDraft(e.target.value)}
                   placeholder="http://172.20.10.3:8000"
-                  className="w-56 rounded-xl border border-fuchsia-400/40 bg-black/50 px-3 py-1.5 font-mono text-xs text-white focus:outline-none"
+                  className="w-48 rounded-xl border border-fuchsia-400/40 bg-black/50 px-2.5 py-1.5 font-mono text-xs text-white focus:outline-none"
                 />
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+                  className="inline-flex items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
                 >
                   <Check className="h-3.5 w-3.5" />
-                  OK
                 </button>
               </form>
             ) : (
@@ -574,11 +462,11 @@ export default function App() {
                   setApiDraft(apiBaseUrl);
                   setIsEditingApi(true);
                 }}
-                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-300 transition hover:bg-white/10 cursor-pointer"
-                title="Изменить базовый URL OTP Shield (VITE_OTP_API_URL)"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-white/10 cursor-pointer"
+                title="Изменить URL OTP Shield"
               >
                 <Globe className="h-3.5 w-3.5 text-fuchsia-300" />
-                <span className="font-mono">{apiBaseUrl}</span>
+                <span className="hidden sm:inline font-mono">{apiBaseUrl}</span>
                 <Settings2 className="h-3.5 w-3.5 text-zinc-400" />
               </button>
             )}
@@ -586,78 +474,55 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="mx-auto flex w-full max-w-7xl flex-1 items-center px-4 py-6 sm:px-6 lg:px-8">
-        <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-12 lg:items-stretch">
-          <div className="lg:col-span-5 flex flex-col">
-            <RegistrationPanel
-              authMode={authMode}
-              onChangeAuthMode={(mode) => {
-                setAuthMode(mode);
-                setErrorStatus(null);
-                setErrorDetail(null);
-                setErrorMessage('');
-              }}
-              username={username}
-              onChangeUsername={setUsername}
-              email={email}
-              onChangeEmail={setEmail}
-              password={password}
-              onChangePassword={setPassword}
-              confirmPassword={confirmPassword}
-              onChangeConfirmPassword={setConfirmPassword}
-              countryKey={countryKey}
-              onChangeCountry={(next) => {
-                setCountryKey(next);
-                setPhoneDigits('');
-                setSendAttemptIndex(0);
-              }}
-              phoneDigits={phoneDigits}
-              onChangePhoneDigits={setPhoneDigits}
-              loginIdentifier={loginIdentifier}
-              onChangeLoginIdentifier={setLoginIdentifier}
-              loginPassword={loginPassword}
-              onChangeLoginPassword={setLoginPassword}
-              step={step}
-              pendingAuth={pendingAuth}
-              otpDigits={otpDigits}
-              onChangeOtpDigits={setOtpDigits}
-              otpCountdown={otpCountdown}
-              otpTtlTotal={otpTtlTotal}
-              resendCooldown={resendCooldown}
-              lockoutSeconds={lockoutSeconds}
-              errorStatus={errorStatus}
-              errorDetail={errorDetail}
-              errorMessage={errorMessage}
-              shakeKey={shakeKey}
-              isLoading={isLoading}
-              activeUser={activeUser}
-              onSubmitRegister={handleSubmitRegister}
-              onSubmitLogin={handleSubmitLogin}
-              onResendOtp={handleResendOtp}
-              onVerifyCode={handleVerifyCode}
-              onBackToForm={() => {
-                setStep('form');
-                setErrorStatus(null);
-                setErrorDetail(null);
-                setErrorMessage('');
-              }}
-              onLogout={handleLogout}
-            />
-          </div>
-
-          <div className="lg:col-span-7 flex flex-col">
-            <BackendDemoPanel
-              apiBaseUrl={apiBaseUrl}
-              accounts={accounts}
-              activeUser={activeUser}
-              httpLogs={httpLogs}
-              onClearLogs={() => setHttpLogs([])}
-              onDeleteAccount={handleDeleteAccount}
-              onSelectAccountForLogin={handleSelectAccountForLogin}
-            />
-          </div>
-        </div>
+      {/* Центрированный экран регистрации или страница поздравления */}
+      <main className="mx-auto flex w-full max-w-5xl flex-1 items-center justify-center px-4 py-8 sm:px-6">
+        {step === 'celebration' && activeUser ? (
+          <CelebrationPage
+            user={activeUser}
+            onRegisterAnother={handleRegisterAnother}
+          />
+        ) : (
+          <RegistrationPanel
+            username={username}
+            onChangeUsername={setUsername}
+            email={email}
+            onChangeEmail={setEmail}
+            password={password}
+            onChangePassword={setPassword}
+            confirmPassword={confirmPassword}
+            onChangeConfirmPassword={setConfirmPassword}
+            countryKey={countryKey}
+            onChangeCountry={(next) => {
+              setCountryKey(next);
+              setPhoneDigits('');
+              setSendAttemptIndex(0);
+            }}
+            phoneDigits={phoneDigits}
+            onChangePhoneDigits={setPhoneDigits}
+            step={step}
+            pendingAuth={pendingAuth}
+            otpDigits={otpDigits}
+            onChangeOtpDigits={setOtpDigits}
+            otpCountdown={otpCountdown}
+            otpTtlTotal={otpTtlTotal}
+            resendCooldown={resendCooldown}
+            lockoutSeconds={lockoutSeconds}
+            errorStatus={errorStatus}
+            errorDetail={errorDetail}
+            errorMessage={errorMessage}
+            shakeKey={shakeKey}
+            isLoading={isLoading}
+            onSubmitRegister={handleSubmitRegister}
+            onResendOtp={handleResendOtp}
+            onVerifyCode={handleVerifyCode}
+            onBackToForm={() => {
+              setStep('form');
+              setErrorStatus(null);
+              setErrorDetail(null);
+              setErrorMessage('');
+            }}
+          />
+        )}
       </main>
     </div>
   );
