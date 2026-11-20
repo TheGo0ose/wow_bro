@@ -159,16 +159,9 @@ def _legend_html(analysis: Analysis) -> str:
 
 def build_map(analysis: Analysis) -> folium.Map:
     b = analysis.bounds
-    # Esri is the default: it needs no API key and works when the HTML is opened straight
-    # from disk. OpenStreetMap blocks such requests (file://, no Referer), so it is optional.
-    fmap = folium.Map(location=b.center, zoom_start=14, control_scale=True, tiles=None)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Tiles © Esri",
-        name="Esri Street Map",
-        max_zoom=19,
-    ).add_to(fmap)
-    folium.TileLayer("OpenStreetMap", name="OpenStreetMap (только по http)", show=False).add_to(fmap)
+    # Note: OpenStreetMap refuses tiles when the HTML is opened from disk (file://, no
+    # Referer). Serve the map over http(s), e.g. GitHub Pages or `python -m http.server`.
+    fmap = folium.Map(location=b.center, zoom_start=14, control_scale=True, tiles="OpenStreetMap")
     folium.Rectangle(
         bounds=[(b.lat_min, b.lon_min), (b.lat_max, b.lon_max)],
         color="#1565c0",

@@ -110,3 +110,13 @@ data/                   открытые данные задания и expected
 - Бонус: тепловая карта.
 
 Для просмотра карты нужен интернет (подложка OpenStreetMap и скрипты Leaflet грузятся из CDN).
+
+Важно: OpenStreetMap не отдаёт тайлы странице, открытой двойным кликом (`file://`).
+Карту нужно открывать по http: на GitHub Pages (деплой делает `.github/workflows/pages.yml`)
+или локально:
+
+```bash
+python -m http.server 8000 --directory output
+```
+
+и открыть http://localhost:8000/coverage_map.html.
