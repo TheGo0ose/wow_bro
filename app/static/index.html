@@ -516,7 +516,10 @@
       <div class="panel">
         <div class="panel-header">
           <div class="panel-title">Telecom &amp; Billing</div>
-          <span id="telecom-gw-detail" class="pill pill-muted" style="font-size:11px;padding:4px 9px;">Gateway: Checking</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span id="telecom-storage-badge" class="pill pill-muted" style="font-size:11px;padding:4px 9px;">SDP: Checking</span>
+            <span id="telecom-gw-detail" class="pill pill-muted" style="font-size:11px;padding:4px 9px;">Gateway: Checking</span>
+          </div>
         </div>
 
         <div class="telecom-accounts">
@@ -534,7 +537,10 @@
               <span class="badge ev-failed">5 TPS</span>
             </div>
             <div class="acct-meta">Throttled &bull; 0.30 som/seg</div>
-            <div id="bal-bulk" class="acct-bal" style="color:var(--amber);">1000.00 som</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;">
+              <div id="bal-bulk" class="acct-bal" style="color:var(--amber);margin-top:0;">1000.00 som</div>
+              <button id="btn-topup-bulk" class="btn-ghost" style="padding:5px 10px;font-size:11px;">+500 som</button>
+            </div>
           </div>
         </div>
 
@@ -544,6 +550,7 @@
               <tr>
                 <th>msg_id</th>
                 <th>msisdn</th>
+                <th>Operator / HLR</th>
                 <th>channel</th>
                 <th>seg</th>
                 <th>cost_som</th>
@@ -551,7 +558,7 @@
               </tr>
             </thead>
             <tbody id="cdrs-tbody">
-              <tr><td colspan="6" class="empty-row">No CDR records yet.</td></tr>
+              <tr><td colspan="7" class="empty-row">No CDR records yet.</td></tr>
             </tbody>
           </table>
         </div>
@@ -585,6 +592,7 @@
       const elCdrsBody = document.getElementById("cdrs-tbody");
       const elBalOtp = document.getElementById("bal-otp");
       const elBalBulk = document.getElementById("bal-bulk");
+      const elStorageBadge = document.getElementById("telecom-storage-badge");
       const elGwDetail = document.getElementById("telecom-gw-detail");
       const elFeedback = document.getElementById("action-feedback");
 
@@ -621,6 +629,7 @@
         const s = String(status || "").toUpperCase();
         if (s === "DELIVRD") return "ev-verified";
         if (s === "SUBMITTED") return "ev-failed";
+        if (s === "UNDELIV") return "ev-locked";
         return "ev-locked";
       }
 
@@ -695,6 +704,12 @@
           elGwDetail.textContent = "Gateway: STANDBY";
         }
 
+        if (typeof telecom.storage_engine === "string" && telecom.storage_engine) {
+          const isPg = telecom.storage_engine.toLowerCase().includes("postgres");
+          elStorageBadge.className = isPg ? "pill pill-ok" : "pill pill-warn";
+          elStorageBadge.textContent = isPg ? "SDP: PostgreSQL 18 (ACID)" : "SDP: Redis Fallback";
+        }
+
         const balances = telecom.balances || {};
         if ("otp_svc" in balances) {
           elBalOtp.textContent = `${num(balances.otp_svc, 5000).toFixed(2)} som`;
@@ -705,7 +720,7 @@
 
         const cdrs = Array.isArray(telecom.cdrs) ? telecom.cdrs : [];
         if (cdrs.length === 0) {
-          elCdrsBody.innerHTML = '<tr><td colspan="6" class="empty-row">No CDR records yet.</td></tr>';
+          elCdrsBody.innerHTML = '<tr><td colspan="7" class="empty-row">No CDR records yet.</td></tr>';
           return;
         }
 
@@ -713,9 +728,14 @@
           .slice(0, 40)
           .map((c) => {
             const st = String(c.status || "SUBMITTED").toUpperCase();
+            const opText = escapeHtml(c.operator || "-");
+            const hlrTag = c.hlr_status === "ABSENT_SUBSCRIBER"
+              ? ' <span class="badge ev-locked" style="font-size:10px;padding:1px 5px;">ABSENT_SUBSCRIBER</span>'
+              : "";
             return `<tr>
               <td title="${escapeHtml(c.msg_id)}">${escapeHtml(String(c.msg_id || "").slice(0, 12))}</td>
               <td>${escapeHtml(c.msisdn || "-")}</td>
+              <td>${opText}${hlrTag}</td>
               <td>${escapeHtml(c.channel || "-")}</td>
               <td>${escapeHtml(c.segments ?? 1)}</td>
               <td>${num(c.cost_som, 0).toFixed(2)}</td>
@@ -904,12 +924,43 @@
             }),
           });
           const body = await resp.json().catch(() => ({}));
-          elFeedback.style.color = resp.ok ? "var(--cyan)" : "var(--amber)";
-          elFeedback.textContent = `POST /telecom/bulk -> ${resp.status} (${JSON.stringify(body).slice(0, 80)})`;
+          if (resp.status === 402) {
+            elFeedback.style.color = "var(--red)";
+            elFeedback.textContent = "HTTP 402: Insufficient balance for bulk_mkt! Click +500 som to top up.";
+          } else {
+            elFeedback.style.color = resp.ok ? "var(--cyan)" : "var(--amber)";
+            elFeedback.textContent = `POST /telecom/bulk -> ${resp.status} (${JSON.stringify(body).slice(0, 80)})`;
+          }
           scheduleStatsRefresh();
         } catch (err) {
           elFeedback.style.color = "var(--red)";
           elFeedback.textContent = `POST /telecom/bulk failed: ${err.message}`;
+        }
+      });
+
+      document.getElementById("btn-topup-bulk").addEventListener("click", async () => {
+        elFeedback.textContent = "Topping up bulk_mkt (+500 som)...";
+        try {
+          const resp = await fetch("/telecom/topup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ channel: "bulk_mkt", amount: 500 }),
+          });
+          const body = await resp.json().catch(() => ({}));
+          if (resp.ok) {
+            const bal = body.balances && "bulk_mkt" in body.balances
+              ? `${num(body.balances.bulk_mkt, 0).toFixed(2)} som`
+              : "ok";
+            elFeedback.style.color = "var(--emerald)";
+            elFeedback.textContent = `POST /telecom/topup -> ${resp.status} (bulk_mkt: ${bal})`;
+          } else {
+            elFeedback.style.color = "var(--amber)";
+            elFeedback.textContent = `POST /telecom/topup -> ${resp.status} (${JSON.stringify(body).slice(0, 80)})`;
+          }
+          fetchStats();
+        } catch (err) {
+          elFeedback.style.color = "var(--red)";
+          elFeedback.textContent = `POST /telecom/topup failed: ${err.message}`;
         }
       });
 

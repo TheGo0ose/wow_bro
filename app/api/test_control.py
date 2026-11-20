@@ -14,6 +14,8 @@ from app.config import (
 )
 from app.core.clock import clock
 from app.core.redis_client import get_redis
+from app.services.billing_service import reset_billing_state
+from app.services.hlr_service import reset_hlr_overrides
 
 router = APIRouter(tags=["test-control"])
 
@@ -89,6 +91,8 @@ async def reset_clock_and_state(
 
     if do_flush:
         await redis_client.flushdb()
+        await reset_billing_state(redis_client)
+        await reset_hlr_overrides(redis_client)
 
     if do_clear_outbox:
         outbox_path = resolve_outbox_path()

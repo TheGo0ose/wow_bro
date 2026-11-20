@@ -27,8 +27,10 @@ async def run_bulk_flood(base_url: str, count: int, poll_seconds: float) -> int:
         before_resp.raise_for_status()
         before = before_resp.json()
         before_bal = before.get("balances", {})
+        storage_engine = before.get("storage_engine", "Unknown")
+        console.print(f"[bold]Storage Engine:[/] [cyan]{storage_engine}[/]")
 
-        # 1. Fire 50 promotional bulk SMS (bulk_mkt, 5 TPS)
+        # 1. Fire promotional bulk SMS (bulk_mkt, 5 TPS)
         t_bulk_start = time.perf_counter()
         bulk_resp = await client.post(
             "/telecom/bulk",
@@ -46,8 +48,14 @@ async def run_bulk_flood(base_url: str, count: int, poll_seconds: float) -> int:
         otp_ms = (time.perf_counter() - t_otp_start) * 1000.0
 
         console.print(
-            f"[bold]POST /telecom/bulk ({count} SMS):[/] HTTP {bulk_resp.status_code} in {bulk_ms:.1f} ms"
+            f"[bold]POST /telecom/bulk ({count} SMS):[/] HTTP {bulk_resp.status_code} "
+            f"in {bulk_ms:.1f} ms"
         )
+        if bulk_resp.status_code == 402:
+            console.print(
+                "[bold red]Insufficient balance for bulk_mkt (HTTP 402)[/] "
+                f"detail={bulk_resp.json()}"
+            )
         console.print(
             f"[bold]POST /otp/send ({priority_msisdn}):[/] HTTP {otp_resp.status_code} in "
             f"[bold green]{otp_ms:.1f} ms[/] (unblocked by bulk queue)"
@@ -104,6 +112,7 @@ async def run_bulk_flood(base_url: str, count: int, poll_seconds: float) -> int:
     cdr_table = Table(title=f"Latest CDR Records (showing up to 15 of {len(cdrs)})")
     cdr_table.add_column("msg_id", style="cyan")
     cdr_table.add_column("msisdn")
+    cdr_table.add_column("Operator / HLR")
     cdr_table.add_column("channel")
     cdr_table.add_column("segments", justify="right")
     cdr_table.add_column("cost_som", justify="right")
@@ -111,10 +120,19 @@ async def run_bulk_flood(base_url: str, count: int, poll_seconds: float) -> int:
 
     for c in cdrs[:15]:
         st = str(c.get("status", "SUBMITTED"))
-        st_styled = f"[green]{st}[/]" if st == "DELIVRD" else f"[yellow]{st}[/]"
+        if st == "DELIVRD":
+            st_styled = f"[green]{st}[/]"
+        elif st == "UNDELIV":
+            st_styled = f"[red]{st}[/]"
+        else:
+            st_styled = f"[yellow]{st}[/]"
+        op = str(c.get("operator") or "-")
+        hlr_status = str(c.get("hlr_status", ""))
+        op_hlr = f"{op} [red]({hlr_status})[/]" if hlr_status == "ABSENT_SUBSCRIBER" else op
         cdr_table.add_row(
             str(c.get("msg_id", "")),
             str(c.get("msisdn", "")),
+            op_hlr,
             str(c.get("channel", "")),
             str(c.get("segments", 1)),
             f"{float(c.get('cost_som', 0.0)):.2f}",

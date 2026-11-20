@@ -13,9 +13,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+import redis.asyncio as aioredis
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+
+from app.services.hlr_service import lookup_hlr_async
 
 logging.basicConfig(
     level=logging.INFO,
@@ -87,6 +92,8 @@ class SmscState:
             "DLR_CALLBACK_URL", "http://otp-api:8000/telecom/dlr"
         )
         self.rabbitmq_url: str = os.environ.get("RABBITMQ_URL", "")
+        self.redis_url: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        self.redis_client: Redis | None = None
         self.bulk_tps: float = float(os.environ.get("BULK_TPS", "5.0"))
 
         self.otp_queue: asyncio.Queue[SmsJob] = asyncio.Queue()
@@ -104,6 +111,7 @@ class SmscState:
             "dlr_sent": 0,
             "dlr_failed": 0,
             "amqp_published": 0,
+            "hlr_absent": 0,
         }
 
     @property
@@ -294,11 +302,18 @@ async def dispatch_job(
     loopback: SmppLoopbackClient,
     http_client: httpx.AsyncClient,
 ) -> None:
-    """Execute SMPP loopback submit_sm and post DLR callback."""
-    try:
-        await loopback.submit_sm(job)
-    except (OSError, asyncio.IncompleteReadError) as exc:
-        logger.warning("SMPP loopback submit_sm error for %s: %s", job.msg_id, exc)
+    """Resolve HLR/MNP routing, execute SMPP submit_sm if in-network, and post DLR."""
+    hlr = await lookup_hlr_async(state.redis_client, job.msisdn)
+    dlr_status = "DELIVRD"
+
+    if hlr.in_network:
+        try:
+            await loopback.submit_sm(job)
+        except (OSError, asyncio.IncompleteReadError) as exc:
+            logger.warning("SMPP loopback submit_sm error for %s: %s", job.msg_id, exc)
+    else:
+        state.counters["hlr_absent"] += 1
+        dlr_status = "UNDELIV"
 
     if job.channel == "otp_svc":
         state.counters["otp_dispatched"] += 1
@@ -308,7 +323,13 @@ async def dispatch_job(
     try:
         resp = await http_client.post(
             state.dlr_callback_url,
-            json={"msg_id": job.msg_id, "msisdn": job.msisdn, "status": "DELIVRD"},
+            json={
+                "msg_id": job.msg_id,
+                "msisdn": job.msisdn,
+                "status": dlr_status,
+                "operator": hlr.operator,
+                "hlr_status": hlr.hlr_status,
+            },
             timeout=1.5,
         )
         if resp.status_code < 400:
@@ -367,6 +388,19 @@ def create_gateway_app(state: SmscState) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        if state.redis_url:
+            client: Redis | None = None
+            try:
+                client = aioredis.from_url(state.redis_url, decode_responses=True)
+                await client.ping()
+                state.redis_client = client
+            except (RedisError, OSError) as exc:
+                logger.warning("Optional Redis connection unavailable for HLR sync: %s", exc)
+                if client is not None:
+                    with suppress(RedisError, OSError):
+                        await client.aclose()
+                state.redis_client = None
+
         await smpp_server.start()
         try:
             await loopback.ensure_bound()
@@ -385,6 +419,10 @@ def create_gateway_app(state: SmscState) -> FastAPI:
             await loopback.close()
             await smpp_server.stop()
             await http_client.aclose()
+            if state.redis_client is not None:
+                with suppress(RedisError, OSError):
+                    await state.redis_client.aclose()
+                state.redis_client = None
 
     gateway = FastAPI(title="OTP-Shield Telecom SMSC Gateway", lifespan=lifespan)
 
@@ -440,6 +478,11 @@ def create_gateway_app(state: SmscState) -> FastAPI:
             },
             "counters": dict(state.counters),
         }
+
+    @gateway.get("/hlr/lookup")
+    async def hlr_lookup(msisdn: str) -> dict[str, Any]:
+        hlr = await lookup_hlr_async(state.redis_client, msisdn)
+        return hlr.to_dict()
 
     @gateway.post("/send")
     async def send_sms(request: Request) -> JSONResponse:

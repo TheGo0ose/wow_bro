@@ -12,9 +12,29 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.config import get_settings
-from app.services.billing_service import count_sms_segments, create_cdr
+from app.services.billing_service import (
+    CHANNEL_RATES_SOM,
+    InsufficientBalanceError,
+    count_sms_segments,
+    create_cdr,
+    precheck_balance,
+)
+from app.services.hlr_service import lookup_hlr_async
 
 logger = logging.getLogger("otp_shield.telecom")
+
+_DEMO_BULK_MSISDNS = (
+    "996770730000",
+    "996550730001",
+    "996700730002",
+    "996770730003",
+    "996550730004",
+    "996700730005",
+    "996700730006",
+    "996770730007",
+    "996770730008",
+    "996550730009",
+)
 
 
 def _telecom_enabled() -> str:
@@ -92,6 +112,7 @@ class SmsDispatcher:
         }
 
         try:
+            hlr = await lookup_hlr_async(redis_client, msisdn)
             await create_cdr(
                 redis_client,
                 msg_id=msg_id,
@@ -101,11 +122,15 @@ class SmsDispatcher:
                 encoding=encoding,
                 segments=segments,
                 status="SUBMITTED",
+                operator=hlr.operator,
+                hlr_status=hlr.hlr_status,
             )
             async with httpx.AsyncClient(timeout=2.0) as client:
                 resp = await client.post(url, json=payload)
             if resp.status_code >= 400:
                 self._mark_offline()
+        except InsufficientBalanceError as exc:
+            logger.warning("Skipping OTP telecom dispatch due to balance limit: %s", exc)
         except (httpx.HTTPError, RedisError, OSError):
             self._mark_offline()
 
@@ -122,6 +147,9 @@ class SmsDispatcher:
     ) -> dict[str, Any]:
         """Dispatch a promotional bulk SMS batch through the low-priority channel."""
         encoding, segments = count_sms_segments(text)
+        total_cost = round(CHANNEL_RATES_SOM["bulk_mkt"] * segments * count, 2)
+        await precheck_balance(redis_client, channel="bulk_mkt", required_som=total_cost)
+
         if (
             _telecom_enabled() != "false"
             and not self._telecom_online
@@ -134,8 +162,13 @@ class SmsDispatcher:
 
         for idx in range(count):
             msg_id = f"bulk-{uuid.uuid4().hex[:12]}"
-            msisdn = f"99677073{idx % 50:04d}"
+            msisdn = (
+                _DEMO_BULK_MSISDNS[idx]
+                if idx < len(_DEMO_BULK_MSISDNS)
+                else f"99677073{idx % 50:04d}"
+            )
             msg_ids.append(msg_id)
+            hlr = await lookup_hlr_async(redis_client, msisdn)
             await create_cdr(
                 redis_client,
                 msg_id=msg_id,
@@ -145,6 +178,8 @@ class SmsDispatcher:
                 encoding=encoding,
                 segments=segments,
                 status="SUBMITTED",
+                operator=hlr.operator,
+                hlr_status=hlr.hlr_status,
             )
             messages.append(
                 {

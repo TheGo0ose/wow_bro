@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.api.otp import router as otp_router
@@ -20,7 +21,7 @@ from app.api.telecom import router as telecom_router
 from app.api.test_control import router as test_control_router
 from app.config import get_settings
 from app.core.redis_client import close_redis, get_redis
-from app.services.billing_service import ensure_balances
+from app.services.billing_service import close_billing, ensure_balances
 from app.services.sms_dispatcher import sms_dispatcher
 
 logger = logging.getLogger("otp_shield.main")
@@ -52,6 +53,9 @@ async def _periodic_telecom_probe() -> None:
         await asyncio.sleep(5.0)
         with suppress(Exception):
             await sms_dispatcher.probe_gateway()
+        with suppress(Exception):
+            redis_client = await _maybe_await(get_redis())
+            await ensure_balances(redis_client)
 
 
 @asynccontextmanager
@@ -77,6 +81,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             with suppress(asyncio.CancelledError):
                 await probe_task
         with suppress(Exception):
+            await close_billing()
+        with suppress(Exception):
             await _maybe_await(close_redis())
 
 
@@ -86,6 +92,15 @@ def create_app() -> FastAPI:
         title="OTP Shield",
         version="1.0.0",
         lifespan=lifespan,
+    )
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["Retry-After"],
     )
 
     @application.exception_handler(RequestValidationError)

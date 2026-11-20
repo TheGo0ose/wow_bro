@@ -34,6 +34,7 @@ services:
       TELECOM_GATEWAY_URL: http://telecom-gateway:1401
       TELECOM_ENABLED: ${TELECOM_ENABLED:-auto}
       TEST_MODE: ${TEST_MODE:-true}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://otp:otp_secret@postgres:5432/otp_billing}
     volumes:
       - ./outbox:/app/outbox
     depends_on:
@@ -45,6 +46,24 @@ services:
       timeout: 3s
       retries: 12
       start_period: 5s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18-alpine
+    container_name: otp-postgres
+    profiles: ["telecom"]
+    mem_limit: 256m
+    environment:
+      POSTGRES_USER: otp
+      POSTGRES_PASSWORD: otp_secret
+      POSTGRES_DB: otp_billing
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otp -d otp_billing"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
   rabbitmq:

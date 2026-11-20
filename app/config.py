@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     TELECOM_GATEWAY_URL: str = "http://localhost:1401"
     TELECOM_ENABLED: str = "auto"
     TEST_MODE: bool = False
+    DATABASE_URL: str = "postgresql://otp:otp_secret@localhost:5432/otp_billing"
 
 
 _overrides_lock = threading.Lock()
@@ -55,6 +56,7 @@ _OVERRIDE_KEY_MAP: dict[str, str] = {
     "send_limit": "SEND_LIMIT_10M",
     "send_window_seconds": "SEND_WINDOW_SECONDS",
     "cooldowns": "COOLDOWNS",
+    "database_url": "DATABASE_URL",
 }
 
 
