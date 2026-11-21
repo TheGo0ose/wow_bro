@@ -186,7 +186,168 @@ async def run_attack_3_race_replay(
     )
 
 
-async def run_all(base_url: str, identities_path: Path, outbox_path: Path) -> int:
+def _pick_wrong_code(seed: int, forbidden: str | set[str]) -> str:
+    """Generate a deterministic 6-digit guess that does not match any forbidden OTP."""
+    blocked = {forbidden} if isinstance(forbidden, str) else forbidden
+    candidate = seed % 1_000_000
+    while f"{candidate:06d}" in blocked:
+        candidate = (candidate + 1) % 1_000_000
+    return f"{candidate:06d}"
+
+
+async def run_attack_4_jury_1000(
+    client: httpx.AsyncClient,
+    numbers: list[str],
+    outbox_path: Path,
+    suffix: int,
+    attempts: int = 1000,
+) -> AttackResult:
+    """Attack 4: Jury 1000-attempt multi-wave simulation (IP rotation, 50-MSISDN spray, botnet).
+
+    Wave 4A (300): Single MSISDN brute-forced with 300 rotated IPs; final guess uses real code.
+    Wave 4B (350): Single attacker IP spraying 50 MSISDNs (7 passes).
+    Wave 4C (350): 35-IP botnet concurrently attacking 10 active targets (35 req/target).
+    """
+    wave_a_n = max(10, (attempts * 30) // 100)
+    wave_b_n = max(50, (attempts * 35) // 100)
+    wave_c_n = max(50, attempts - wave_a_n - wave_b_n)
+
+    # Wave 4A: Single-MSISDN IP-rotation brute-force
+    wave4a_msisdn = f"996779{suffix:05d}0"
+    send_4a = await client.post(
+        "/otp/send",
+        json={"msisdn": wave4a_msisdn},
+        headers={"X-Forwarded-For": "10.200.0.1"},
+    )
+    if send_4a.status_code != 200:
+        return AttackResult(
+            name=f"4. Jury {attempts}-Attempt Multi-Wave Attack",
+            target=f"{attempts} requests (3 waves)",
+            expected="0x 200 (0 breaches), 0x 500",
+            observed=f"Wave 4A send failed: {send_4a.status_code}",
+            breaches=0,
+            blocked_or_stopped=False,
+        )
+    real_code_4a = read_latest_code(outbox_path, wave4a_msisdn)
+
+    statuses_4a: list[int] = []
+    sem = asyncio.Semaphore(40)
+
+    async def fire_verify(msisdn: str, code: str, ip: str) -> int:
+        async with sem:
+            resp = await client.post(
+                "/otp/verify",
+                json={"msisdn": msisdn, "code": code},
+                headers={"X-Forwarded-For": ip},
+            )
+            return resp.status_code
+
+    for i in range(wave_a_n):
+        ip = f"10.200.{(i // 250) % 250}.{(i % 250) + 1}"
+        guess = real_code_4a if i == wave_a_n - 1 else _pick_wrong_code(100000 + i, real_code_4a)
+        statuses_4a.append(await fire_verify(wave4a_msisdn, guess, ip))
+
+    stats_after_4a = await client.get("/security/stats", params={"limit": 200})
+    leaked_codes = False
+    if stats_after_4a.status_code == 200:
+        leaked_codes = real_code_4a in json.dumps(stats_after_4a.json().get("events", []))
+    else:
+        leaked_codes = True
+
+    # Wave 4B: Single-IP high-volume 50-MSISDN spray
+    spray_attacker_ip = "198.51.100.250"
+    statuses_4b: list[int] = []
+    for i in range(wave_b_n):
+        msisdn = numbers[i % 50]
+        guess = f"{(200000 + i) % 1_000_000:06d}"
+        statuses_4b.append(await fire_verify(msisdn, guess, spray_attacker_ip))
+
+    # Wave 4C: Distributed botnet concurrent attack across 10 active targets (35 IPs)
+    wave4c_targets = [f"996779{suffix:05d}{k:02d}" for k in range(1, 11)]
+    wave4c_codes: list[str] = []
+    for target_msisdn in wave4c_targets:
+        send_resp = await client.post(
+            "/otp/send",
+            json={"msisdn": target_msisdn},
+            headers={"X-Forwarded-For": "10.201.0.254"},
+        )
+        if send_resp.status_code != 200:
+            return AttackResult(
+                name=f"4. Jury {attempts}-Attempt Multi-Wave Attack",
+                target=f"{attempts} requests (3 waves)",
+                expected="0x 200 (0 breaches), 0x 500",
+                observed=f"Wave 4C send failed for {target_msisdn}: {send_resp.status_code}",
+                breaches=0,
+                blocked_or_stopped=False,
+            )
+        wave4c_codes.append(read_latest_code(outbox_path, target_msisdn))
+
+    wave4c_tasks = []
+    for i in range(wave_c_n):
+        target_idx = i % len(wave4c_targets)
+        target_msisdn = wave4c_targets[target_idx]
+        target_real_code = wave4c_codes[target_idx]
+        bot_ip = f"10.201.1.{(i % 35) + 1}"
+        guess = _pick_wrong_code(300000 + i, target_real_code)
+        wave4c_tasks.append(fire_verify(target_msisdn, guess, bot_ip))
+
+    statuses_4c = list(await asyncio.gather(*wave4c_tasks))
+
+    stats_after_4c = await client.get("/security/stats", params={"limit": 200})
+    if stats_after_4c.status_code == 200:
+        events_json = json.dumps(stats_after_4c.json().get("events", []))
+        if real_code_4a in events_json or any(c in events_json for c in wave4c_codes):
+            leaked_codes = True
+    else:
+        leaked_codes = True
+
+    all_statuses = statuses_4a + statuses_4b + statuses_4c
+    total_counts = Counter(all_statuses)
+    breaches = total_counts.get(200, 0)
+    server_errors = total_counts.get(500, 0)
+
+    c4a = Counter(statuses_4a)
+    c4b = Counter(statuses_4b)
+    c4c = Counter(statuses_4c)
+
+    wave4a_ok = c4a == Counter({401: 4, 423: wave_a_n - 4})
+    wave4b_ok = (
+        all(s in (401, 423) for s in statuses_4b[:20])
+        and all(s == 429 for s in statuses_4b[20:])
+        and c4b.get(200, 0) == 0
+    )
+    wave4c_ok = c4c == Counter({401: 40, 423: wave_c_n - 40})
+    stopped = (
+        len(all_statuses) == wave_a_n + wave_b_n + wave_c_n
+        and breaches == 0
+        and server_errors == 0
+        and not leaked_codes
+        and wave4a_ok
+        and wave4b_ok
+        and wave4c_ok
+    )
+
+    observed = (
+        f"total={len(all_statuses)} {dict(sorted(total_counts.items()))} "
+        f"[4A:{dict(sorted(c4a.items()))}, 4B:{dict(sorted(c4b.items()))}, 4C:{dict(sorted(c4c.items()))}, "
+        f"audit_leak={leaked_codes}]"
+    )
+    return AttackResult(
+        name=f"4. Jury {wave_a_n + wave_b_n + wave_c_n}-Attempt Multi-Wave Attack",
+        target="4A(1x300 rot) + 4B(50x7 1IP) + 4C(10x35 botnet)",
+        expected="0x 200 (0 breaches), 0x 500, audit clean",
+        observed=observed,
+        breaches=breaches,
+        blocked_or_stopped=stopped,
+    )
+
+
+async def run_all(
+    base_url: str,
+    identities_path: Path,
+    outbox_path: Path,
+    attempts: int = 1000,
+) -> int:
     console = Console()
     numbers, client_ips = load_identities(identities_path)
 
@@ -208,8 +369,9 @@ async def run_all(base_url: str, identities_path: Path, outbox_path: Path) -> in
         r1 = await run_attack_1_bruteforce(client, attack1_msisdn, bf_ip)
         r2 = await run_attack_2_ip_spray(client, numbers, spray_ip)
         r3 = await run_attack_3_race_replay(client, attack3_msisdn, outbox_path)
+        r4 = await run_attack_4_jury_1000(client, numbers, outbox_path, suffix, attempts=attempts)
 
-    results = [r1, r2, r3]
+    results = [r1, r2, r3, r4]
     total_breaches = sum(r.breaches for r in results)
     all_defended = all(r.blocked_or_stopped and r.breaches == 0 for r in results)
 
@@ -254,10 +416,23 @@ def main() -> int:
     parser.add_argument(
         "--outbox",
         default=str(repo_root / "outbox" / "sms.jsonl"),
-        help="Path to outbox/sms.jsonl (used only for Attack 3 replay demo)",
+        help="Path to outbox/sms.jsonl (used only for Attack 3 & Wave 4A/4C audit verification)",
+    )
+    parser.add_argument(
+        "--attempts",
+        type=int,
+        default=1000,
+        help="Number of verify attempts for Attack 4 jury multi-wave simulation (default: 1000)",
     )
     args = parser.parse_args()
-    return asyncio.run(run_all(args.base_url, Path(args.identities), Path(args.outbox)))
+    return asyncio.run(
+        run_all(
+            args.base_url,
+            Path(args.identities),
+            Path(args.outbox),
+            attempts=args.attempts,
+        )
+    )
 
 
 if __name__ == "__main__":
