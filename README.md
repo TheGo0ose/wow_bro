@@ -24,7 +24,7 @@ SOC-дашборд доступен в браузере по адресу: `http
 
 ### 2. Полный контур с телеком-шлюзом (`--profile telecom`)
 
-Поднимает базовый контур + `rabbitmq:4-management-alpine` (AMQP `:5672`, UI `:15672`) + `telecom-gateway` (SMPP v3.4 `:2775`, HTTP API `:1401`). Благодаря `TELECOM_ENABLED=auto` сервис `otp-api` автоматически обнаруживает `telecom-gateway` и переходит в статус `BOUND_TRX` без дополнительных флагов:
+Поднимает базовый контур + `otp-rabbitmq` (`rabbitmq:4-management-alpine`, AMQP `:5672`, UI `:15672`) + `otp-postgres` (`postgres:18-alpine`, `:5432`) + `otp-telecom-gateway` (`infra/telecom_smsc.py`, SMPP v3.4 `:2775`, HTTP API `:1401`). Благодаря `TELECOM_ENABLED=auto` сервис `otp-api` автоматически обнаруживает `otp-telecom-gateway` и переходит в статус `BOUND_TRX` без дополнительных флагов. Весь биллинг, HLR/MNP-маршрутизация и SQL-транзакции изолированы на стороне оператора:
 
 ```bash
 docker compose --profile telecom up --build -d
@@ -62,20 +62,35 @@ cp .env.example .env
          │
          ▼
   ┌──────────────────────────────────────────────────────────┐
-  │ FastAPI (app/main.py, app/api/*)                         │
+  │ otp-api (FastAPI, app/main.py, app/api/*)                │
   │  • POST /otp/send, POST /otp/verify                      │
   │  • GET / (SOC-дашборд), /security/stats, /security/stream│
-  │  • GET /telecom/status, POST /telecom/bulk, /telecom/dlr │
+  │  • Thin proxy: /telecom/status, /bulk, /topup, /hlr      │
+  │  • Webhook: POST /telecom/dlr (без записи в audit log)   │
+  │  • Zero SQL / Zero billing / Zero HLR logic              │
   └───────────────┬──────────────────────┬───────────────────┘
-                  │                      │ (фоновый, неблокирующий)
+                  │                      │ (фоновый, aio-pika / HTTP)
                   ▼                      ▼
   ┌───────────────────────────┐   ┌──────────────────────────┐
-  │ Redis + Lua (атомарно)    │   │ Outbox + Telecom         │
+  │ Redis + Lua (атомарно)    │   │ Outbox + AMQP            │
   │  • SEND_OTP_LUA           │   │  • outbox/sms.jsonl      │
   │  • VERIFY_OTP_LUA         │   │  • Circuit Breaker       │
-  │  • Stream security:events │   │  • telecom-gateway :1401 │
-  │  • Billing / CDR          │   │    SMPP v3.4 :2775 + RMQ │
-  └───────────────────────────┘   └──────────────────────────┘
+  │  • Stream security:events │   │  • otp-rabbitmq (:5672)  │
+  └───────────────────────────┘   └──────────────┬───────────┘
+                                                 │ smsc.otp_svc / smsc.bulk_mkt
+                                                 ▼
+                                  ┌──────────────────────────┐
+                                  │ otp-telecom-gateway      │
+                                  │  • SMPP v3.4 (:2775)     │
+                                  │  • HLR/MNP (infra/hlr.py)│
+                                  │  • CCN 402 + ACID Billing│
+                                  └──────────────┬───────────┘
+                                                 │ asyncpg (ACID)
+                                                 ▼
+                                  ┌──────────────────────────┐
+                                  │ otp-postgres (PG 18)     │
+                                  │  • sdp_accounts/cdrs/hlr │
+                                  └──────────────────────────┘
 ```
 
 ### Криптография и конфиденциальность
@@ -102,9 +117,10 @@ cp .env.example .env
 Сервис использует этот файл исключительно на дозапись (append + flush) для тестового перехвата доставки и никогда его не читает.
 
 ### Телеком-контур и SOC-дашборд
-- **SOC-дашборд (`GET /`):** тёмная тема, KPI-счётчики, живая SSE-лента событий (`GET /security/stream`) и панель телеком-канала.
-- **Приоритетные каналы и биллинг:** `otp_svc` (`100 TPS`, `0.45 сом/сегм.`) и `bulk_mkt` (`5 TPS`, `0.30 сом/сегм.`), автоматический подсчёт сегментов GSM-7 (160/153) и UCS-2 (70/67), запись CDR и обновление статусов `SUBMITTED → DELIVRD` через callback `POST /telecom/dlr`.
-- **Изоляция от ядра:** отправка через `telecom-gateway` идёт асинхронно в фоне и защищена неблокирующим Circuit Breaker — недоступность шлюза никогда не влияет на время ответа или статус `/otp/send` и `/otp/verify`.
+- **SOC-дашборд (`GET /`):** тёмная тема, KPI-счётчики, живая SSE-лента событий (`GET /security/stream`) с отдельным SSE-событием `telecom_dlr` (мгновенно обновляет панель телекома без замусоривания Security Audit Stream) и панель телеком-канала (`SDP: PostgreSQL 18 (SDP-07 ACID)` или `STANDBY (Operator Offline)`).
+- **Чистая граница оператора (`otp-api` ↔ `otp-rabbitmq` ↔ `otp-telecom-gateway` ↔ `otp-postgres`):** в `otp-api` полностью отсутствуют SQL/биллинг/HLR-логика. `otp-api` публикует OTP в очередь `smsc.otp_svc` через `aio-pika` (с TTL `OTP_TTL` и фоновым HTTP-fallback при отключённом AMQP) и проксирует управляющие запросы (`/telecom/status`, `/telecom/bulk`, `/telecom/topup`, `/telecom/hlr`, `/telecom/hlr/mnp`) на шлюз оператора (возвращая `503 TELECOM_GATEWAY_OFFLINE`, если оператор не запущен).
+- **Приоритетные каналы, HLR/MNP и ACID-биллинг (CCN 402):** на стороне `otp-telecom-gateway` реализованы очереди `otp_svc` (`100 TPS`, `0.45 сом/сегм.`) и `bulk_mkt` (`5 TPS`, `0.30 сом/сегм.`), подсчёт сегментов GSM-7 (160/153) и UCS-2 (70/67), HLR/MNP-маршрутизация (`Beeline KG`, `MEGA`, `O!`, перенесённые `[MNP]` и `ABSENT_SUBSCRIBER` → `UNDELIV`), проверка баланса с HTTP `402 INSUFFICIENT_BALANCE`, отбрасывание просроченных OTP (`EXPIRED`, `0.00 сом`), идемпотентные CDR в `otp-postgres` (`SDP-07 ACID`) и DLR-коллбэки на `POST /telecom/dlr`.
+- **Изоляция от ядра:** отправка через `otp-rabbitmq` / `otp-telecom-gateway` идёт асинхронно в фоне и защищена неблокирующим Circuit Breaker — недоступность телеком-контура никогда не влияет на время ответа или статус `/otp/send` и `/otp/verify`.
 
 ---
 
@@ -167,6 +183,7 @@ curl -sS -X POST http://localhost:8000/telecom/bulk \
 В набор входят:
 - `tests/test_scenarios_examples.py` — прогон открытых сценариев из `scenarios_examples.json` (`O01`, `O03`, `O07`, `O12`, `O16`) с фикстурой `test_identities.json`;
 - `tests/test_otp_scenarios.py` — проверка криптографии, outbox, всех граничных условий (`29.999` с, `120.0` с), блокировок `423`, лимитов `429`, IP-лимитов, журнала безопасности и валидации;
+- `tests/test_telecom_operator.py` — тестирование изолированного контура оператора (`HLR/MNP`, `CCN 402`, идемпотентный биллинг/CDR, отбрасывание просроченных OTP, `ABSENT_SUBSCRIBER` → `UNDELIV`) и границы `otp-api` (`503 STANDBY`, `POST /telecom/dlr` без загрязнения `security:events`);
 - `tests/test_concurrency.py` — проверка защиты от race condition при `20` и `50` параллельных `verify`.
 
 ### Демонстрация атак (`scripts/attack.py`)
@@ -194,9 +211,9 @@ curl -sS -X POST http://localhost:8000/telecom/bulk \
 
 ### Что сделано
 - **Базовое ядро OTP (`app/core/`, `app/services/`, `app/api/`):** генерация через `secrets.randbelow`, хеширование `HMAC-SHA256`, атомарные Lua-скрипты в Redis (`SEND_OTP_LUA`, `VERIFY_OTP_LUA`) с постоянным временем сравнения (`bit.bxor` + `bit.bor`), миллисекундные скользящие окна, прогрессивные задержки `30/60/120` с, лимит `3` отправки за `10` минут, блокировка `423` после `5` ошибок на `15` минут (для `/verify` и `/send`), IP-лимит `20` проверок/мин, транспорт `outbox/sms.jsonl`, аудит `security:events` без утечки кодов.
-- **Автотесты и пентест-инструменты:** реализованы все 5 открытых сценариев из `scenarios_examples.json`, расширенный набор сценариев в `tests/test_otp_scenarios.py` (включая 18+ проверок граничных условий и валидации), тесты параллельности `tests/test_concurrency.py` (20 и 50 одновременных запросов), а также `scripts/attack.py` и `scripts/bulk_flood.py`.
-- **SOC-дашборд:** однофайловый интерфейс `app/static/index.html` с живой SSE-лентой (`GET /security/stream`), агрегированной статистикой (`GET /security/stats`), фильтрацией по MSISDN/IP и отображением телеком-метрик.
-- **Телеком-контур (профиль `telecom`):** `rabbitmq:4-management-alpine` + собственный шлюз `infra/telecom_smsc.py` с поддержкой бинарного протокола SMPP v3.4 (`:2775`), HTTP API (`:1401`), приоритетных очередей (`otp_svc` `100 TPS` vs `bulk_mkt` `5 TPS`), сегментации GSM-7/UCS-2, биллинга, CDR и DLR-коллбэков (`POST /telecom/dlr`).
+- **Автотесты и пентест-инструменты:** реализованы все 5 открытых сценариев из `scenarios_examples.json`, расширенный набор сценариев в `tests/test_otp_scenarios.py`, тесты границы оператора и телеком-контура в `tests/test_telecom_operator.py`, тесты параллельности `tests/test_concurrency.py` (20 и 50 одновременных запросов), а также `scripts/attack.py` и `scripts/bulk_flood.py`.
+- **SOC-дашборд:** однофайловый интерфейс `app/static/index.html` с живой SSE-лентой (`GET /security/stream` + событие `telecom_dlr`), агрегированной статистикой (`GET /security/stats`), фильтрацией по MSISDN/IP и отображением телеком-метрик (`SDP: PostgreSQL 18 (SDP-07 ACID)` / `STANDBY`).
+- **Телеком-контур (профиль `telecom`):** `otp-rabbitmq` (`rabbitmq:4-management-alpine`) + `otp-postgres` (`postgres:18-alpine`) + шлюз оператора `otp-telecom-gateway` (`infra/telecom_smsc.py`, `infra/hlr.py`, `infra/billing_db.py`) с поддержкой бинарного протокола SMPP v3.4 (`:2775`), HTTP API (`:1401`), `aio-pika` очередей (`smsc.otp_svc` `100 TPS` vs `smsc.bulk_mkt` `5 TPS`), сегментации GSM-7/UCS-2, HLR/MNP, CCN `402`, идемпотентного ACID-биллинга в PostgreSQL и DLR-коллбэков (`POST /telecom/dlr`). При этом `otp-api` не содержит SQL/биллинг-зависимостей и проксирует запросы на шлюз оператора.
 - **Контейнеризация и качество кода:** неблокирующий `docker compose up --build -d` (non-root пользователь, `healthcheck`, `restart: unless-stopped`), чистый `ruff check .`.
 
 ### Что не успели / осознанные упрощения

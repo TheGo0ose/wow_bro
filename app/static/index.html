@@ -529,7 +529,7 @@
               <span class="badge ev-sent">100 TPS</span>
             </div>
             <div class="acct-meta">Priority: High &bull; 0.45 som/seg</div>
-            <div id="bal-otp" class="acct-bal">5000.00 som</div>
+            <div id="bal-otp" class="acct-bal">--</div>
           </div>
           <div class="acct-box">
             <div class="acct-head">
@@ -538,7 +538,7 @@
             </div>
             <div class="acct-meta">Throttled &bull; 0.30 som/seg</div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;">
-              <div id="bal-bulk" class="acct-bal" style="color:var(--amber);margin-top:0;">1000.00 som</div>
+              <div id="bal-bulk" class="acct-bal" style="color:var(--amber);margin-top:0;">--</div>
               <button id="btn-topup-bulk" class="btn-ghost" style="padding:5px 10px;font-size:11px;">+500 som</button>
             </div>
           </div>
@@ -704,20 +704,35 @@
           elGwDetail.textContent = "Gateway: STANDBY";
         }
 
-        if (typeof telecom.storage_engine === "string" && telecom.storage_engine) {
-          const isPg = telecom.storage_engine.toLowerCase().includes("postgres");
-          elStorageBadge.className = isPg ? "pill pill-ok" : "pill pill-warn";
-          elStorageBadge.textContent = isPg ? "SDP: PostgreSQL 18 (ACID)" : "SDP: Redis Fallback";
+        if (!online) {
+          elStorageBadge.className = "pill pill-muted";
+          elStorageBadge.textContent = "STANDBY (Operator Offline)";
+          elBalOtp.textContent = "STANDBY";
+          elBalBulk.textContent = "STANDBY";
+        } else {
+          const se = typeof telecom.storage_engine === "string" ? telecom.storage_engine : "";
+          if (se.toLowerCase().includes("postgres")) {
+            elStorageBadge.className = "pill pill-ok";
+            elStorageBadge.textContent = "SDP: PostgreSQL 18 (SDP-07 ACID)";
+          } else if (se) {
+            elStorageBadge.className = "pill pill-info";
+            elStorageBadge.textContent = `SDP: ${se}`;
+          }
+
+          if (telecom.balances && typeof telecom.balances === "object") {
+            const balances = telecom.balances;
+            elBalOtp.textContent = "otp_svc" in balances
+              ? `${num(balances.otp_svc, 0).toFixed(2)} som`
+              : "--";
+            elBalBulk.textContent = "bulk_mkt" in balances
+              ? `${num(balances.bulk_mkt, 0).toFixed(2)} som`
+              : "--";
+          }
         }
 
-        const balances = telecom.balances || {};
-        if ("otp_svc" in balances) {
-          elBalOtp.textContent = `${num(balances.otp_svc, 5000).toFixed(2)} som`;
+        if (!("cdrs" in telecom) && online) {
+          return;
         }
-        if ("bulk_mkt" in balances) {
-          elBalBulk.textContent = `${num(balances.bulk_mkt, 1000).toFixed(2)} som`;
-        }
-
         const cdrs = Array.isArray(telecom.cdrs) ? telecom.cdrs : [];
         if (cdrs.length === 0) {
           elCdrsBody.innerHTML = '<tr><td colspan="7" class="empty-row">No CDR records yet.</td></tr>';
@@ -863,6 +878,10 @@
           }
         };
 
+        es.addEventListener("telecom_dlr", () => {
+          scheduleStatsRefresh();
+        });
+
         es.onerror = () => {
           sseConnected = false;
           elStream.className = "pill pill-warn";
@@ -924,7 +943,10 @@
             }),
           });
           const body = await resp.json().catch(() => ({}));
-          if (resp.status === 402) {
+          if (resp.status === 503) {
+            elFeedback.style.color = "var(--amber)";
+            elFeedback.textContent = "HTTP 503: Operator offline -- start with --profile telecom";
+          } else if (resp.status === 402) {
             elFeedback.style.color = "var(--red)";
             elFeedback.textContent = "HTTP 402: Insufficient balance for bulk_mkt! Click +500 som to top up.";
           } else {
@@ -947,7 +969,10 @@
             body: JSON.stringify({ channel: "bulk_mkt", amount: 500 }),
           });
           const body = await resp.json().catch(() => ({}));
-          if (resp.ok) {
+          if (resp.status === 503) {
+            elFeedback.style.color = "var(--amber)";
+            elFeedback.textContent = "HTTP 503: Operator offline -- start with --profile telecom";
+          } else if (resp.ok) {
             const bal = body.balances && "bulk_mkt" in body.balances
               ? `${num(body.balances.bulk_mkt, 0).toFixed(2)} som`
               : "ok";

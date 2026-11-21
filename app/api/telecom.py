@@ -1,20 +1,12 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from redis.asyncio import Redis
 
-from app.core.redis_client import get_redis
-from app.services.billing_service import (
-    InsufficientBalanceError,
-    get_billing_snapshot,
-    topup_balance,
-    update_cdr_status,
-)
-from app.services.hlr_service import lookup_hlr_async, register_mnp
+from app.services.audit import broadcast_telecom_dlr
 from app.services.sms_dispatcher import sms_dispatcher
 
 router = APIRouter(tags=["telecom"])
@@ -26,6 +18,7 @@ class DlrCallback(BaseModel):
     msg_id: str
     msisdn: str = ""
     status: Literal["DELIVRD", "EXPIRED", "UNDELIV", "SUBMITTED"]
+    channel: str = ""
     operator: str = ""
     hlr_status: str = ""
 
@@ -53,105 +46,50 @@ class HlrMnpRequest(BaseModel):
 
 
 @router.post("/telecom/dlr")
-async def telecom_dlr(
-    payload: DlrCallback,
-    redis_client: Annotated[Redis, Depends(get_redis)],
-) -> dict[str, Any]:
-    """Update a CDR delivery status from a telecom DLR callback."""
-    updated = await update_cdr_status(
-        redis_client,
-        msg_id=payload.msg_id,
-        status=payload.status,
-        msisdn=payload.msisdn,
-        operator=payload.operator,
-        hlr_status=payload.hlr_status,
-    )
+async def telecom_dlr(payload: DlrCallback) -> dict[str, Any]:
+    """Accept a telecom DLR webhook and notify SSE clients without polluting audit logs."""
+    broadcast_telecom_dlr(payload.model_dump())
     return {
         "status": "ok",
-        "updated": updated,
+        "updated": True,
         "msg_id": payload.msg_id,
         "dlr_status": payload.status,
     }
 
 
 @router.get("/telecom/status")
-async def telecom_status(
-    redis_client: Annotated[Redis, Depends(get_redis)],
-) -> dict[str, Any]:
-    """Return telecom gateway health and current billing snapshot."""
-    snapshot = await get_billing_snapshot(redis_client)
-    return {
-        "gateway": sms_dispatcher.get_status(),
-        **snapshot,
-    }
+async def telecom_status() -> dict[str, Any]:
+    """Return telecom gateway health and current operator billing/HLR snapshot."""
+    return await sms_dispatcher.get_telecom_snapshot()
 
 
 @router.post("/telecom/bulk", response_model=None)
-async def telecom_bulk(
-    payload: BulkRequest,
-    redis_client: Annotated[Redis, Depends(get_redis)],
-) -> dict[str, Any] | JSONResponse:
-    """Dispatch a throttled bulk SMS batch via the bulk_mkt channel."""
-    try:
-        return await sms_dispatcher.send_bulk_batch(
-            redis_client,
-            count=payload.count,
-            text=payload.text,
-        )
-    except InsufficientBalanceError as exc:
-        return JSONResponse(
-            status_code=402,
-            content={
-                "detail": "INSUFFICIENT_BALANCE",
-                "channel": exc.channel,
-                "balance": exc.balance,
-                "required": exc.required,
-            },
-        )
+async def telecom_bulk(payload: BulkRequest) -> JSONResponse:
+    """Proxy a throttled bulk SMS batch to the telecom operator gateway."""
+    code, body = await sms_dispatcher.proxy_bulk(payload.count, payload.text)
+    return JSONResponse(status_code=code, content=body)
 
 
-@router.post("/telecom/topup")
-async def telecom_topup(
-    payload: TopupRequest,
-    redis_client: Annotated[Redis, Depends(get_redis)],
-) -> dict[str, Any]:
-    """Top up a telecom channel account balance."""
-    balances = await topup_balance(
-        redis_client,
-        channel=payload.channel,
-        amount_som=payload.amount,
+@router.post("/telecom/topup", response_model=None)
+async def telecom_topup(payload: TopupRequest) -> JSONResponse:
+    """Proxy a channel account balance top-up to the telecom operator gateway."""
+    code, body = await sms_dispatcher.proxy_topup(payload.channel, payload.amount)
+    return JSONResponse(status_code=code, content=body)
+
+
+@router.get("/telecom/hlr", response_model=None)
+async def telecom_hlr_lookup(msisdn: str) -> JSONResponse:
+    """Proxy an HLR/MNP routing lookup to the telecom operator gateway."""
+    code, body = await sms_dispatcher.proxy_hlr_lookup(msisdn)
+    return JSONResponse(status_code=code, content=body)
+
+
+@router.post("/telecom/hlr/mnp", response_model=None)
+async def telecom_hlr_mnp(payload: HlrMnpRequest) -> JSONResponse:
+    """Proxy an MNP operator override or network presence update to the operator gateway."""
+    code, body = await sms_dispatcher.proxy_hlr_mnp(
+        payload.msisdn,
+        payload.operator,
+        payload.in_network,
     )
-    return {
-        "status": "ok",
-        "channel": payload.channel,
-        "amount": round(float(payload.amount), 2),
-        "balances": balances,
-    }
-
-
-@router.get("/telecom/hlr")
-async def telecom_hlr_lookup(
-    msisdn: str,
-    redis_client: Annotated[Redis, Depends(get_redis)],
-) -> dict[str, Any]:
-    """Perform an HLR/MNP routing lookup for an MSISDN."""
-    result = await lookup_hlr_async(redis_client, msisdn)
-    return result.to_dict()
-
-
-@router.post("/telecom/hlr/mnp")
-async def telecom_hlr_mnp(
-    payload: HlrMnpRequest,
-    redis_client: Annotated[Redis, Depends(get_redis)],
-) -> dict[str, Any]:
-    """Update MNP operator override or network presence for an MSISDN."""
-    try:
-        result = await register_mnp(
-            redis_client,
-            msisdn=payload.msisdn,
-            operator=payload.operator,
-            in_network=payload.in_network,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return result.to_dict()
+    return JSONResponse(status_code=code, content=body)

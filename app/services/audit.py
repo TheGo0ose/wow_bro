@@ -51,6 +51,11 @@ def broadcast(payload: dict[str, Any]) -> None:
             continue
 
 
+def broadcast_telecom_dlr(payload: dict[str, Any]) -> None:
+    """Push a telecom DLR SSE notification without polluting security events/stats."""
+    broadcast({"_sse_event": "telecom_dlr", "data": payload})
+
+
 async def subscribe_events() -> AsyncIterator[dict[str, Any]]:
     """Yield live security events for SSE clients."""
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=200)

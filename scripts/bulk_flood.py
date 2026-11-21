@@ -51,7 +51,12 @@ async def run_bulk_flood(base_url: str, count: int, poll_seconds: float) -> int:
             f"[bold]POST /telecom/bulk ({count} SMS):[/] HTTP {bulk_resp.status_code} "
             f"in {bulk_ms:.1f} ms"
         )
-        if bulk_resp.status_code == 402:
+        if bulk_resp.status_code == 503:
+            console.print(
+                "[bold yellow]Telecom operator offline (HTTP 503). "
+                "Start with: docker compose --profile telecom up -d[/]"
+            )
+        elif bulk_resp.status_code == 402:
             console.print(
                 "[bold red]Insufficient balance for bulk_mkt (HTTP 402)[/] "
                 f"detail={bulk_resp.json()}"
@@ -107,6 +112,17 @@ async def run_bulk_flood(base_url: str, count: int, poll_seconds: float) -> int:
         bal_table.add_row(acct, meta, f"{b_val:.2f}", f"{a_val:.2f}", f"{a_val - b_val:+.2f}")
 
     console.print(bal_table)
+
+    final_storage = latest_status.get("storage_engine", storage_engine)
+    latest_gw = latest_status.get("gateway", {})
+    counters = latest_gw.get("counters", latest_gw)
+    counter_parts = [
+        f"{k}={counters[k]}"
+        for k in ("amqp_consumed", "otp_dispatched", "bulk_dispatched")
+        if k in counters
+    ]
+    gw_summary = f" | Counters: {', '.join(counter_parts)}" if counter_parts else ""
+    console.print(f"[bold]Storage Engine:[/] [cyan]{final_storage}[/]{gw_summary}")
 
     cdrs = latest_status.get("cdrs", [])
     cdr_table = Table(title=f"Latest CDR Records (showing up to 15 of {len(cdrs)})")

@@ -12,7 +12,6 @@ from redis.asyncio import Redis
 
 from app.core.redis_client import get_redis
 from app.services.audit import get_security_stats, subscribe_events
-from app.services.billing_service import get_billing_snapshot
 from app.services.sms_dispatcher import sms_dispatcher
 
 router = APIRouter(tags=["security"])
@@ -32,17 +31,13 @@ async def security_stats(
         client_ip=ip,
         limit=limit,
     )
-    billing = await get_billing_snapshot(redis_client)
+    telecom_snapshot = await sms_dispatcher.get_telecom_snapshot()
     return {
         "counters": stats.get("counters", {}),
         "active_locks": stats.get("active_locks", 0),
         "successful_breaches": stats.get("successful_breaches", 0),
         "events": stats.get("events", []),
-        "telecom": {
-            "gateway": sms_dispatcher.get_status(),
-            "balances": billing.get("balances", {}),
-            "cdrs": billing.get("cdrs", []),
-        },
+        "telecom": telecom_snapshot,
     }
 
 
@@ -67,7 +62,13 @@ async def security_stream(request: Request) -> StreamingResponse:
                     continue
                 event = pending.result()
                 pending = None
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if "_sse_event" in event:
+                    yield (
+                        f"event: {event['_sse_event']}\n"
+                        f"data: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+                    )
+                else:
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except (StopAsyncIteration, asyncio.CancelledError):
             pass
         finally:

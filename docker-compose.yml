@@ -34,7 +34,7 @@ services:
       TELECOM_GATEWAY_URL: http://telecom-gateway:1401
       TELECOM_ENABLED: ${TELECOM_ENABLED:-auto}
       TEST_MODE: ${TEST_MODE:-true}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://otp:otp_secret@postgres:5432/otp_billing}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
     volumes:
       - ./outbox:/app/outbox
     depends_on:
@@ -93,13 +93,13 @@ services:
       - "1401:1401"
       - "2775:2775"
     environment:
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql://otp:otp_secret@postgres:5432/otp_billing}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       DLR_CALLBACK_URL: http://otp-api:8000/telecom/dlr
       GATEWAY_HTTP_PORT: "1401"
       SMPP_PORT: "2775"
     depends_on:
-      redis:
+      postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
