@@ -8,10 +8,10 @@ export const USE_REAL_API = process.env.USE_REAL_API === 'true';
 /**
  * URL реального боевого OTP Shield (через ngrok).
  * Укажите его через переменную окружения REAL_API_URL
- * (по умолчанию: https://2b1e-213-145-157-190.ngrok-free.app).
+ * (по умолчанию: https://14c6-213-145-157-190.ngrok-free.app).
  */
 export const REAL_API_URL =
-  process.env.REAL_API_URL || 'https://2b1e-213-145-157-190.ngrok-free.app';
+  process.env.REAL_API_URL || 'https://14c6-213-145-157-190.ngrok-free.app';
 
 /**
  * Хелпер настройки сетевого слоя для E2E-тестов OTP Shield (ТЗ 6).

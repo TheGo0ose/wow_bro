@@ -4,7 +4,7 @@ import { normalizeMsisdn } from '../utils/phoneMask';
  * Постоянный базовый URL бэкенда OTP Shield (через ngrok).
  * Используется всегда при любых запросах с фронтенда.
  */
-export const API_BASE_URL = 'https://2b1e-213-145-157-190.ngrok-free.app';
+export const API_BASE_URL = 'https://14c6-213-145-157-190.ngrok-free.app';
 
 const REQUEST_TIMEOUT_MS = 5000;
 
