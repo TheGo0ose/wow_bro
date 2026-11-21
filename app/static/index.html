@@ -1,564 +1,658 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OTP-Shield // SOC &amp; Telecom Dashboard</title>
+  <title>OTP Shield — пульт безопасности</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Tektur:wght@500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #070b14;
-      --bg-elev: #0d1424;
-      --card: #111a2e;
-      --card-border: #1e2c4a;
-      --text: #e6edf7;
-      --muted: #8ea0c0;
-      --emerald: #10b981;
-      --emerald-bg: rgba(16, 185, 129, 0.14);
-      --cyan: #38bdf8;
-      --cyan-bg: rgba(56, 189, 248, 0.14);
-      --amber: #f59e0b;
-      --amber-bg: rgba(245, 158, 11, 0.15);
-      --red: #f43f5e;
-      --red-bg: rgba(244, 63, 94, 0.15);
-      --violet: #a78bfa;
-      --violet-bg: rgba(167, 139, 250, 0.16);
-      --slate: #94a3b8;
-      --slate-bg: rgba(148, 163, 184, 0.14);
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --case: #e4e7e2;          /* корпус прибора */
+      --case-deep: #d5dad3;     /* утопленные поля */
+      --case-edge: #b9c1b8;     /* грани и линейки */
+      --ink: #17332b;           /* основной текст */
+      --ink-soft: #4e6159;      /* вторичный текст */
+      --signal: #1e7a4c;        /* всё в порядке */
+      --amber: #b97f00;         /* внимание */
+      --alarm: #d9431e;         /* тревога */
+      --screen: #0f241d;        /* окно журнала */
+      --screen-line: #1d3a30;
+      --phosphor: #cfead8;      /* текст на экране */
+      --phosphor-dim: #7fa390;
+
+      --display: "Tektur", "Bahnschrift", "DIN Alternate", "Arial Narrow", sans-serif;
+      --body: "Golos Text", "Segoe UI", system-ui, sans-serif;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: radial-gradient(circle at top right, #111d38 0%, var(--bg) 52%);
-      color: var(--text);
-      font-family: var(--sans);
-      min-height: 100vh;
-      line-height: 1.45;
-      padding: 18px 22px 32px;
+      background: var(--case);
+      color: var(--ink);
+      font-family: var(--body);
+      font-size: 15px;
+      line-height: 1.5;
+      font-variant-numeric: tabular-nums;
     }
 
-    .container {
-      max-width: 1440px;
+    :focus-visible {
+      outline: 3px solid var(--amber);
+      outline-offset: 2px;
+    }
+
+    .console {
+      max-width: 1320px;
       margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
+      padding: 20px 24px 40px;
     }
 
-    /* Top Status Bar */
-    .topbar {
+    /* ---------- Верхняя рейка: название и светодиоды ---------- */
+    .rail {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      background: var(--bg-elev);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 14px 18px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      gap: 12px 28px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid var(--ink);
     }
 
-    .brand {
+    .rail h1 {
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 26px;
+      letter-spacing: 0.01em;
+      line-height: 1.1;
+    }
+
+    .rail h1 span {
+      display: block;
+      font-family: var(--body);
+      font-weight: 400;
+      font-size: 14px;
+      color: var(--ink-soft);
+      margin-top: 2px;
+      letter-spacing: 0;
+    }
+
+    .leds {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 22px;
+      list-style: none;
+    }
+
+    .led {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--ink-soft);
     }
 
-    .brand-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 9px;
-      background: linear-gradient(135deg, #0ea5e9, #10b981);
+    .led b { font-weight: 600; color: var(--ink); }
+
+    .led i {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--case-edge);
+      box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+      flex: none;
+    }
+
+    .led[data-state="ok"] i   { background: var(--signal); box-shadow: 0 0 0 3px rgba(30, 122, 76, 0.18); }
+    .led[data-state="warn"] i { background: var(--amber);  box-shadow: 0 0 0 3px rgba(185, 127, 0, 0.2); }
+    .led[data-state="bad"] i  { background: var(--alarm);  box-shadow: 0 0 0 3px rgba(217, 67, 30, 0.2); }
+
+    /* ---------- Главный блок: поле кода ---------- */
+    .seal {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 28px 44px;
+      align-items: center;
+      padding: 34px 0 30px;
+      border-bottom: 1px solid var(--case-edge);
+    }
+
+    .slots {
+      display: grid;
+      grid-template-columns: repeat(6, 64px);
+      gap: 10px;
+    }
+
+    .slot {
+      height: 84px;
+      border-radius: 10px;
+      background: var(--case-deep);
+      border: 2px solid var(--case-edge);
       display: grid;
       place-items: center;
-      font-weight: 800;
-      font-family: var(--mono);
-      color: #03121e;
-      font-size: 15px;
+      font-family: var(--display);
+      font-size: 34px;
+      color: var(--ink);
+      box-shadow: inset 0 3px 0 rgba(0, 0, 0, 0.06);
+      transition: background 0.25s, border-color 0.25s, color 0.25s;
     }
 
-    .brand h1 {
-      font-size: 17px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
+    .slots.struck .slot {
+      background: var(--alarm);
+      border-color: var(--alarm);
+      color: #fff;
+      transition: none;
     }
 
-    .brand-sub {
-      font-size: 12px;
-      color: var(--muted);
-      font-family: var(--mono);
-    }
-
-    .status-badges {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 6px 12px;
-      border-radius: 999px;
-      font-size: 12px;
+    .seal-text h2 {
+      font-family: var(--display);
       font-weight: 600;
-      font-family: var(--mono);
-      border: 1px solid transparent;
-      white-space: nowrap;
-    }
-
-    .pill-ok { background: var(--emerald-bg); color: var(--emerald); border-color: rgba(16, 185, 129, 0.35); }
-    .pill-info { background: var(--cyan-bg); color: var(--cyan); border-color: rgba(56, 189, 248, 0.35); }
-    .pill-warn { background: var(--amber-bg); color: var(--amber); border-color: rgba(245, 158, 11, 0.35); }
-    .pill-bad { background: var(--red-bg); color: var(--red); border-color: rgba(244, 63, 94, 0.35); }
-    .pill-muted { background: var(--slate-bg); color: var(--slate); border-color: rgba(148, 163, 184, 0.3); }
-
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: currentColor;
-      box-shadow: 0 0 8px currentColor;
-    }
-
-    /* KPI Grid */
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(170px, 1fr));
-      gap: 14px;
-    }
-
-    @media (max-width: 1100px) {
-      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 600px) {
-      .kpi-grid { grid-template-columns: 1fr; }
-    }
-
-    .kpi-card {
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 15px 17px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .kpi-card::before {
-      content: "";
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: var(--accent, var(--cyan));
-    }
-
-    .kpi-label {
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      font-weight: 600;
-    }
-
-    .kpi-value {
       font-size: 30px;
-      font-weight: 800;
-      font-family: var(--mono);
-      color: var(--text);
+      line-height: 1.15;
+      max-width: 22ch;
     }
 
-    .kpi-sub {
-      font-size: 11px;
-      color: var(--muted);
-      font-family: var(--mono);
+    .seal-text p {
+      margin-top: 10px;
+      color: var(--ink-soft);
+      max-width: 60ch;
     }
 
-    /* Interactive Controls */
-    .controls-bar {
-      background: var(--bg-elev);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 14px 18px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+    .seal-text strong { color: var(--ink); font-weight: 600; }
+
+    .seal-text .breach-bad { color: var(--alarm); }
+
+    /* ---------- Рабочая зона ---------- */
+    .work {
+      display: grid;
+      grid-template-columns: 330px 1fr;
+      gap: 32px;
+      padding-top: 28px;
     }
 
-    .control-group {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
+    .side { display: flex; flex-direction: column; gap: 28px; }
+
+    .section-title {
+      font-family: var(--display);
+      font-weight: 600;
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+
+    /* Пульт */
+    .field label {
+      display: block;
+      font-size: 14px;
+      color: var(--ink-soft);
+      margin-bottom: 6px;
     }
 
     input[type="text"] {
-      background: #080e1c;
-      border: 1px solid #263659;
-      color: var(--text);
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-size: 13px;
-      font-family: var(--mono);
-      outline: none;
-      transition: border-color 0.15s;
+      width: 100%;
+      font: inherit;
+      font-size: 16px;
+      color: var(--ink);
+      background: #f3f5f1;
+      border: 2px solid var(--case-edge);
+      border-radius: 6px;
+      padding: 9px 12px;
+      letter-spacing: 0.02em;
     }
 
-    input[type="text"]:focus {
-      border-color: var(--cyan);
+    input[type="text"]:focus { border-color: var(--ink); outline: none; }
+    input[type="text"]:focus-visible { outline: 3px solid var(--amber); outline-offset: 1px; }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
     }
 
     button {
-      border: 1px solid transparent;
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-size: 13px;
+      font: inherit;
+      font-size: 15px;
       font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.08s, opacity 0.15s, background 0.15s;
-      font-family: var(--sans);
-    }
-
-    button:active { transform: translateY(1px); }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #0284c7, #0ea5e9);
-      color: #ffffff;
-    }
-
-    .btn-warn {
-      background: rgba(245, 158, 11, 0.18);
-      color: #fbbf24;
-      border-color: rgba(245, 158, 11, 0.45);
-    }
-
-    .btn-ghost {
-      background: rgba(148, 163, 184, 0.12);
-      color: var(--text);
-      border-color: rgba(148, 163, 184, 0.25);
-    }
-
-    .action-feedback {
-      font-size: 12px;
-      font-family: var(--mono);
-      padding: 6px 10px;
       border-radius: 6px;
-      background: #080e1c;
-      border: 1px solid var(--card-border);
-      color: var(--muted);
-      min-width: 240px;
+      padding: 10px 16px;
+      cursor: pointer;
+      border: 2px solid var(--ink);
+      background: transparent;
+      color: var(--ink);
     }
 
-    /* Main Split Panels */
-    .main-grid {
-      display: grid;
-      grid-template-columns: 1.35fr 1fr;
-      gap: 18px;
-      align-items: start;
+    button:hover { background: rgba(23, 51, 43, 0.07); }
+    button:active { transform: translateY(1px); }
+
+    .btn-main {
+      background: var(--ink);
+      color: var(--case);
     }
 
-    @media (max-width: 1180px) {
-      .main-grid { grid-template-columns: 1fr; }
+    .btn-main:hover { background: #22483c; }
+
+    .btn-small {
+      font-size: 13px;
+      padding: 5px 10px;
+      border-width: 1.5px;
     }
 
-    .panel {
-      background: var(--card);
-      border: 1px solid var(--card-border);
+    .feedback {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border-left: 4px solid var(--case-edge);
+      background: var(--case-deep);
+      font-size: 14px;
+      color: var(--ink-soft);
+      min-height: 44px;
+    }
+
+    .feedback[data-tone="ok"]    { border-left-color: var(--signal); color: var(--ink); }
+    .feedback[data-tone="warn"]  { border-left-color: var(--amber);  color: var(--ink); }
+    .feedback[data-tone="bad"]   { border-left-color: var(--alarm);  color: var(--ink); }
+
+    /* Ведомость счётчиков */
+    .ledger { list-style: none; border-top: 2px solid var(--ink); }
+
+    .ledger li {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--case-edge);
+    }
+
+    .ledger .what small {
+      display: block;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+
+    .ledger .count {
+      font-family: var(--display);
+      font-weight: 600;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .ledger li.alarmish .count { color: var(--alarm); }
+    .ledger li.goodish .count  { color: var(--signal); }
+
+    /* ---------- Окно журнала ---------- */
+    .screen {
+      background: var(--screen);
+      color: var(--phosphor);
       border-radius: 12px;
-      overflow: hidden;
+      border: 6px solid #c9cfc7;
+      box-shadow: inset 0 0 0 1px #000, 0 1px 0 #f6f8f4;
       display: flex;
       flex-direction: column;
+      min-height: 520px;
+      overflow: hidden;
     }
 
-    .panel-header {
-      padding: 14px 18px;
-      background: rgba(7, 11, 20, 0.5);
-      border-bottom: 1px solid var(--card-border);
+    .screen-head {
       display: flex;
       flex-wrap: wrap;
+      gap: 10px 16px;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--screen-line);
     }
 
-    .panel-title {
+    .screen-head h3 {
+      font-family: var(--display);
+      font-weight: 600;
+      font-size: 17px;
+      color: #fff;
+    }
+
+    .screen-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+    .screen-filters input {
+      width: 170px;
       font-size: 14px;
-      font-weight: 700;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-    }
-
-    .filters {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .filters input {
-      width: 155px;
       padding: 6px 10px;
-      font-size: 12px;
+      background: #0a1914;
+      color: var(--phosphor);
+      border: 1.5px solid var(--screen-line);
     }
 
-    .table-wrap {
-      overflow-x: auto;
-      max-height: 490px;
-      overflow-y: auto;
+    .screen-filters input::placeholder { color: var(--phosphor-dim); }
+    .screen-filters input:focus { border-color: var(--phosphor); }
+
+    .screen-filters button {
+      color: var(--phosphor);
+      border-color: var(--screen-line);
     }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12.5px;
+    .screen-filters button:hover { background: rgba(207, 234, 216, 0.08); }
+
+    .scroll {
+      overflow: auto;
+      max-height: 560px;
     }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
 
     th {
       position: sticky;
       top: 0;
-      background: #0d1527;
-      color: var(--muted);
       text-align: left;
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--card-border);
-      z-index: 1;
-    }
-
-    td {
-      padding: 9px 12px;
-      border-bottom: 1px solid rgba(30, 44, 74, 0.55);
-      font-family: var(--mono);
-      vertical-align: middle;
+      font-weight: 500;
+      font-size: 13px;
+      padding: 9px 14px;
       white-space: nowrap;
     }
 
-    tr:hover td {
-      background: rgba(56, 189, 248, 0.04);
+    td {
+      padding: 8px 14px;
+      vertical-align: top;
+      white-space: nowrap;
     }
 
-    .badge {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 700;
-      font-family: var(--mono);
-      letter-spacing: 0.02em;
+    .screen th { background: var(--screen); color: var(--phosphor-dim); border-bottom: 1px solid var(--screen-line); }
+    .screen td { border-bottom: 1px solid rgba(29, 58, 48, 0.6); }
+    .screen td.dim { color: var(--phosphor-dim); }
+
+    .screen tr.ev-new td { animation: arrive 1.2s ease-out; }
+
+    @keyframes arrive {
+      from { background: rgba(207, 234, 216, 0.14); }
+      to   { background: transparent; }
     }
 
-    .ev-sent { background: var(--cyan-bg); color: var(--cyan); }
-    .ev-verified { background: var(--emerald-bg); color: var(--emerald); }
-    .ev-failed { background: var(--amber-bg); color: var(--amber); }
-    .ev-expired { background: var(--slate-bg); color: var(--slate); }
-    .ev-locked { background: var(--red-bg); color: var(--red); }
-    .ev-ratelimit { background: var(--violet-bg); color: var(--violet); }
+    .ev {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
 
-    /* Telecom Accounts */
-    .telecom-accounts {
+    .ev::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--phosphor-dim);
+      flex: none;
+    }
+
+    .ev.ok::before    { background: #49c27f; }
+    .ev.info::before  { background: var(--phosphor); }
+    .ev.warn::before  { background: #e8b23a; }
+    .ev.bad::before   { background: #ff6b45; }
+    .ev.bad           { color: #ffb39e; }
+
+    .detail {
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .empty {
+      padding: 40px 16px;
+      text-align: center;
+      color: var(--phosphor-dim);
+      white-space: normal;
+    }
+
+    /* ---------- Оператор связи ---------- */
+    .operator {
+      margin-top: 36px;
+      padding-top: 24px;
+      border-top: 2px solid var(--ink);
+    }
+
+    .operator-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 24px;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .operator-head .section-title { margin-bottom: 0; }
+
+    .operator-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--card-border);
-      background: rgba(8, 14, 28, 0.45);
+      grid-template-columns: 330px 1fr;
+      gap: 32px;
     }
 
-    @media (max-width: 600px) {
-      .telecom-accounts { grid-template-columns: 1fr; }
+    .wallet {
+      padding: 14px 0;
+      border-bottom: 1px solid var(--case-edge);
     }
 
-    .acct-box {
-      background: var(--bg-elev);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 12px 14px;
+    .wallet:first-child { padding-top: 0; }
+
+    .wallet-top {
       display: flex;
-      flex-direction: column;
-      gap: 4px;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
     }
 
-    .acct-head {
+    .wallet-name { font-weight: 600; }
+
+    .wallet-note { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+
+    .wallet-bal {
+      font-family: var(--display);
+      font-weight: 600;
+      font-size: 26px;
+      line-height: 1.1;
+      margin-top: 6px;
+    }
+
+    .wallet-bal.low { color: var(--alarm); }
+
+    .wallet-row {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
-      font-family: var(--mono);
-      font-size: 13px;
-      font-weight: 700;
+      gap: 8px 12px;
     }
 
-    .acct-meta {
-      font-size: 11px;
-      color: var(--muted);
-      font-family: var(--mono);
+    .wallet-bal, .wallet-row button { white-space: nowrap; }
+
+    .cdr-table {
+      background: #eef1ec;
+      border: 1px solid var(--case-edge);
+      border-radius: 6px;
     }
 
-    .acct-bal {
-      font-size: 20px;
-      font-weight: 800;
-      font-family: var(--mono);
-      color: var(--emerald);
-      margin-top: 2px;
+    .cdr-table th {
+      background: #eef1ec;
+      color: var(--ink-soft);
+      border-bottom: 1.5px solid var(--case-edge);
     }
 
-    .empty-row {
-      text-align: center;
-      color: var(--muted);
-      padding: 26px !important;
-      font-family: var(--sans) !important;
+    .cdr-table td { border-bottom: 1px solid var(--case-deep); }
+    .cdr-table td.dim { color: var(--ink-soft); }
+    .cdr-table .empty { color: var(--ink-soft); }
+
+    .st { font-weight: 600; }
+    .st.ok   { color: var(--signal); }
+    .st.wait { color: var(--amber); }
+    .st.bad  { color: var(--alarm); }
+
+    .absent {
+      display: inline-block;
+      margin-left: 6px;
+      font-size: 12px;
+      color: var(--alarm);
+    }
+
+    /* ---------- Адаптив ---------- */
+    @media (max-width: 1040px) {
+      .work, .operator-grid { grid-template-columns: 1fr; }
+      .side { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+    }
+
+    @media (max-width: 760px) {
+      .console { padding: 16px 16px 32px; }
+      .seal { grid-template-columns: 1fr; padding: 24px 0; }
+      .slots { grid-template-columns: repeat(6, 1fr); gap: 6px; max-width: 420px; }
+      .slot { height: 64px; font-size: 26px; }
+      .seal-text h2 { font-size: 24px; }
+      .side { grid-template-columns: 1fr; }
+      .screen-filters input { width: 100%; }
+      .screen-filters { width: 100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .slot, .screen tr.ev-new td { transition: none; animation: none; }
+      .slots.struck .slot { background: var(--case-deep); border-color: var(--alarm); color: var(--alarm); }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <!-- Top Status Bar -->
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-icon">OTP</div>
-        <div>
-          <h1>OTP-SHIELD // SOC &amp; TELECOM CONSOLE</h1>
-          <div class="brand-sub">HMAC-SHA256 &bull; Atomic Redis Lua &bull; Constant-Time Verify &bull; SMPP v3.4</div>
-        </div>
-      </div>
-      <div class="status-badges">
-        <span id="badge-api" class="pill pill-muted"><span class="dot"></span>API: CHECKING...</span>
-        <span id="badge-leak" class="pill pill-ok"><span class="dot"></span>0 OTP codes in logs</span>
-        <span id="badge-smpp" class="pill pill-muted"><span class="dot"></span>SMPP: STANDBY</span>
-        <span id="badge-stream" class="pill pill-info"><span class="dot"></span>SSE: CONNECTING</span>
-      </div>
+  <div class="console">
+
+    <header class="rail">
+      <h1>OTP Shield
+        <span>Пульт безопасности одноразовых кодов</span>
+      </h1>
+      <ul class="leds" aria-label="Состояние систем">
+        <li class="led" id="led-api" data-state="idle"><i></i><b>Сервис</b> <span>проверяется</span></li>
+        <li class="led" id="led-stream" data-state="idle"><i></i><b>Журнал</b> <span>подключается</span></li>
+        <li class="led" id="led-leak" data-state="ok"><i></i><b>Коды в журнале</b> <span>0</span></li>
+        <li class="led" id="led-smpp" data-state="idle"><i></i><b>SMS-шлюз</b> <span>ожидание</span></li>
+      </ul>
     </header>
 
-    <!-- KPI Cards -->
-    <section class="kpi-grid">
-      <div class="kpi-card" style="--accent: var(--cyan);">
-        <div class="kpi-label">OTP Sent</div>
-        <div id="kpi-sent" class="kpi-value">0</div>
-        <div class="kpi-sub">POST /otp/send 200 OK</div>
+    <section class="seal" aria-labelledby="seal-title">
+      <div class="slots" id="slots" aria-hidden="true">
+        <div class="slot">•</div><div class="slot">•</div><div class="slot">•</div>
+        <div class="slot">•</div><div class="slot">•</div><div class="slot">•</div>
       </div>
-      <div class="kpi-card" style="--accent: var(--emerald);">
-        <div class="kpi-label">OTP Verified</div>
-        <div id="kpi-verified" class="kpi-value">0</div>
-        <div class="kpi-sub">Single-use constant-time</div>
-      </div>
-      <div class="kpi-card" style="--accent: var(--red);">
-        <div class="kpi-label">Numbers Locked (423)</div>
-        <div id="kpi-locked" class="kpi-value">0</div>
-        <div id="kpi-locked-sub" class="kpi-sub">Total lock events: 0</div>
-      </div>
-      <div class="kpi-card" style="--accent: var(--violet);">
-        <div class="kpi-label">Attacks Blocked (429)</div>
-        <div id="kpi-blocked" class="kpi-value">0</div>
-        <div id="kpi-blocked-sub" class="kpi-sub">Send: 0 | IP Spray: 0</div>
-      </div>
-      <div class="kpi-card" style="--accent: var(--emerald);">
-        <div class="kpi-label">Successful Breaches (0)</div>
-        <div id="kpi-breaches" class="kpi-value" style="color: var(--emerald);">0</div>
-        <div class="kpi-sub">Replay &amp; brute-force stopped</div>
+      <div class="seal-text">
+        <h2 id="seal-title">Подобрано кодов: <span id="breaches">0</span></h2>
+        <p id="seal-line">
+          Сервис хранит только HMAC-отпечаток кода, поэтому сам код не видит никто:
+          ни база, ни журнал, ни этот экран.
+        </p>
+        <p id="seal-tally">Ждём первые события.</p>
       </div>
     </section>
 
-    <!-- Interactive Controls -->
-    <section class="controls-bar">
-      <div class="control-group">
-        <label for="test-msisdn" style="font-size:12px;color:var(--muted);font-weight:600;">MSISDN:</label>
-        <input id="test-msisdn" type="text" value="996770730000" placeholder="996770730000" />
-        <button id="btn-send-otp" class="btn-primary">Send Test OTP</button>
-        <button id="btn-bulk-flood" class="btn-warn">Launch Bulk Flood (10 SMS)</button>
-      </div>
-      <div id="action-feedback" class="action-feedback">Ready. Click an action to test live defenses &amp; billing.</div>
-    </section>
+    <div class="work">
+      <aside class="side">
+        <section aria-labelledby="desk-title">
+          <h2 class="section-title" id="desk-title">Проверить вручную</h2>
+          <div class="field">
+            <label for="test-msisdn">Номер абонента</label>
+            <input id="test-msisdn" type="text" inputmode="numeric" value="996770730000" autocomplete="off" />
+          </div>
+          <div class="actions">
+            <button id="btn-send-otp" class="btn-main" type="button">Отправить код</button>
+            <button id="btn-bulk-flood" type="button">Запустить рассылку на 10 SMS</button>
+          </div>
+          <div id="action-feedback" class="feedback" role="status" aria-live="polite">
+            Отправьте код или рассылку: результат и реакция защиты появятся здесь и в журнале.
+          </div>
+        </section>
 
-    <!-- Main Split: Security Audit Stream + Telecom & Billing -->
-    <section class="main-grid">
-      <!-- Security Audit Stream -->
-      <div class="panel">
-        <div class="panel-header">
-          <div class="panel-title">Security Audit Stream</div>
-          <div class="filters">
-            <input id="filter-msisdn" type="text" placeholder="Filter msisdn..." />
-            <input id="filter-ip" type="text" placeholder="Filter client_ip..." />
-            <button id="btn-clear-filters" class="btn-ghost" style="padding:6px 10px;font-size:12px;">Clear</button>
+        <section aria-labelledby="ledger-title">
+          <h2 class="section-title" id="ledger-title">С начала работы</h2>
+          <ul class="ledger">
+            <li><span class="what">Выдано кодов</span><span class="count" id="c-sent">0</span></li>
+            <li class="goodish"><span class="what">Успешных входов</span><span class="count" id="c-verified">0</span></li>
+            <li><span class="what">Неверных кодов</span><span class="count" id="c-failed">0</span></li>
+            <li><span class="what">Истёкших кодов</span><span class="count" id="c-expired">0</span></li>
+            <li class="alarmish">
+              <span class="what">Номеров под блокировкой
+                <small id="c-locked-sub">блокировок всего: 0</small></span>
+              <span class="count" id="c-locked">0</span>
+            </li>
+            <li class="alarmish">
+              <span class="what">Отбито лимитами
+                <small id="c-blocked-sub">выдача: 0, проверки с IP: 0</small></span>
+              <span class="count" id="c-blocked">0</span>
+            </li>
+          </ul>
+        </section>
+      </aside>
+
+      <section class="screen" aria-labelledby="log-title">
+        <div class="screen-head">
+          <h3 id="log-title">Журнал событий безопасности</h3>
+          <div class="screen-filters">
+            <input id="filter-msisdn" type="text" placeholder="Номер" aria-label="Фильтр по номеру" />
+            <input id="filter-ip" type="text" placeholder="IP-адрес" aria-label="Фильтр по IP-адресу" />
+            <button id="btn-clear-filters" class="btn-small" type="button">Сбросить</button>
           </div>
         </div>
-        <div class="table-wrap">
+        <div class="scroll">
           <table>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Event</th>
-                <th>MSISDN</th>
-                <th>Client IP</th>
-                <th>HTTP</th>
-                <th>Detail</th>
+                <th scope="col">Время</th>
+                <th scope="col">Событие</th>
+                <th scope="col">Номер</th>
+                <th scope="col">IP-адрес</th>
+                <th scope="col">Ответ</th>
+                <th scope="col">Подробности</th>
               </tr>
             </thead>
             <tbody id="events-tbody">
-              <tr><td colspan="6" class="empty-row">Waiting for security events...</td></tr>
+              <tr><td colspan="6" class="empty">Событий пока нет. Отправьте код, и запись появится здесь сразу.</td></tr>
             </tbody>
           </table>
         </div>
+      </section>
+    </div>
+
+    <section class="operator" aria-labelledby="op-title">
+      <div class="operator-head">
+        <h2 class="section-title" id="op-title">Оператор связи: оплата и доставка SMS</h2>
+        <div class="leds">
+          <span class="led" id="led-sdp" data-state="idle"><i></i><b>Биллинг</b> <span>проверяется</span></span>
+          <span class="led" id="led-gw" data-state="idle"><i></i><b>Шлюз</b> <span>проверяется</span></span>
+        </div>
       </div>
 
-      <!-- Telecom & Billing Panel -->
-      <div class="panel">
-        <div class="panel-header">
-          <div class="panel-title">Telecom &amp; Billing</div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span id="telecom-storage-badge" class="pill pill-muted" style="font-size:11px;padding:4px 9px;">SDP: Checking</span>
-            <span id="telecom-gw-detail" class="pill pill-muted" style="font-size:11px;padding:4px 9px;">Gateway: Checking</span>
-          </div>
-        </div>
-
-        <div class="telecom-accounts">
-          <div class="acct-box">
-            <div class="acct-head">
-              <span style="color:var(--cyan);">otp_svc</span>
-              <span class="badge ev-sent">100 TPS</span>
+      <div class="operator-grid">
+        <div>
+          <div class="wallet">
+            <div class="wallet-top">
+              <span class="wallet-name">Коды входа (otp_svc)</span>
             </div>
-            <div class="acct-meta">Priority: High &bull; 0.45 som/seg</div>
-            <div id="bal-otp" class="acct-bal">--</div>
+            <div class="wallet-note">Приоритетная очередь, до 100 SMS в секунду, 0,45 сом за сегмент</div>
+            <div class="wallet-bal" id="bal-otp">—</div>
           </div>
-          <div class="acct-box">
-            <div class="acct-head">
-              <span style="color:var(--amber);">bulk_mkt</span>
-              <span class="badge ev-failed">5 TPS</span>
+          <div class="wallet">
+            <div class="wallet-top">
+              <span class="wallet-name">Рассылки (bulk_mkt)</span>
             </div>
-            <div class="acct-meta">Throttled &bull; 0.30 som/seg</div>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;">
-              <div id="bal-bulk" class="acct-bal" style="color:var(--amber);margin-top:0;">--</div>
-              <button id="btn-topup-bulk" class="btn-ghost" style="padding:5px 10px;font-size:11px;">+500 som</button>
+            <div class="wallet-note">Медленная очередь, 5 SMS в секунду, 0,30 сом за сегмент</div>
+            <div class="wallet-row">
+              <div class="wallet-bal" id="bal-bulk">—</div>
+              <button id="btn-topup-bulk" class="btn-small" type="button">Пополнить на 500 сом</button>
             </div>
           </div>
         </div>
 
-        <div class="table-wrap">
+        <div class="scroll cdr-table">
           <table>
             <thead>
               <tr>
-                <th>msg_id</th>
-                <th>msisdn</th>
-                <th>Operator / HLR</th>
-                <th>channel</th>
-                <th>seg</th>
-                <th>cost_som</th>
-                <th>status</th>
+                <th scope="col">Сообщение</th>
+                <th scope="col">Номер</th>
+                <th scope="col">Оператор</th>
+                <th scope="col">Канал</th>
+                <th scope="col">Сегм.</th>
+                <th scope="col">Цена, сом</th>
+                <th scope="col">Статус</th>
               </tr>
             </thead>
             <tbody id="cdrs-tbody">
-              <tr><td colspan="7" class="empty-row">No CDR records yet.</td></tr>
+              <tr><td colspan="7" class="empty">Чеков пока нет. Они появятся, когда шлюз оператора начнёт доставлять SMS.</td></tr>
             </tbody>
           </table>
         </div>
@@ -574,31 +668,35 @@
       let pollTimer = null;
       let refreshDebounce = null;
       let leakedCodesCount = 0;
+      let lastStats = null;
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-      const elApi = document.getElementById("badge-api");
-      const elLeak = document.getElementById("badge-leak");
-      const elSmpp = document.getElementById("badge-smpp");
-      const elStream = document.getElementById("badge-stream");
+      const $ = (id) => document.getElementById(id);
+      const elFeedback = $("action-feedback");
+      const filterMsisdn = $("filter-msisdn");
+      const filterIp = $("filter-ip");
+      const testMsisdn = $("test-msisdn");
 
-      const elSent = document.getElementById("kpi-sent");
-      const elVerified = document.getElementById("kpi-verified");
-      const elLocked = document.getElementById("kpi-locked");
-      const elLockedSub = document.getElementById("kpi-locked-sub");
-      const elBlocked = document.getElementById("kpi-blocked");
-      const elBlockedSub = document.getElementById("kpi-blocked-sub");
-      const elBreaches = document.getElementById("kpi-breaches");
+      // Понятные названия событий. Технический код остаётся в подсказке.
+      const EVENT_TEXT = {
+        OTP_SENT: ["Код выдан", "info"],
+        OTP_VERIFIED: ["Вход подтверждён", "ok"],
+        OTP_FAILED: ["Неверный код", "warn"],
+        OTP_INVALID_OR_USED: ["Кода нет или он использован", "warn"],
+        OTP_EXPIRED: ["Код истёк", "warn"],
+        MSISDN_LOCKED: ["Номер заблокирован", "bad"],
+        RATE_LIMITED_IP: ["Лимит проверок с IP", "bad"],
+        RATE_LIMITED_SEND_10M: ["Лимит выдачи за 10 минут", "bad"],
+        RATE_LIMITED_COOLDOWN: ["Повтор раньше срока", "bad"],
+      };
 
-      const elEventsBody = document.getElementById("events-tbody");
-      const elCdrsBody = document.getElementById("cdrs-tbody");
-      const elBalOtp = document.getElementById("bal-otp");
-      const elBalBulk = document.getElementById("bal-bulk");
-      const elStorageBadge = document.getElementById("telecom-storage-badge");
-      const elGwDetail = document.getElementById("telecom-gw-detail");
-      const elFeedback = document.getElementById("action-feedback");
-
-      const filterMsisdn = document.getElementById("filter-msisdn");
-      const filterIp = document.getElementById("filter-ip");
-      const testMsisdn = document.getElementById("test-msisdn");
+      const CDR_TEXT = {
+        DELIVRD: ["Доставлено", "ok"],
+        SUBMITTED: ["Отправлено", "wait"],
+        UNDELIV: ["Не доставлено", "bad"],
+        EXPIRED: ["Истекло", "bad"],
+        REJECTD: ["Отклонено", "bad"],
+      };
 
       function escapeHtml(val) {
         return String(val ?? "")
@@ -614,197 +712,198 @@
         return Number.isFinite(n) ? n : fallback;
       }
 
-      function eventBadgeClass(evName) {
-        const e = String(evName || "").toUpperCase();
-        if (e === "OTP_SENT") return "ev-sent";
-        if (e === "OTP_VERIFIED") return "ev-verified";
-        if (e === "OTP_FAILED" || e === "OTP_INVALID_OR_USED") return "ev-failed";
-        if (e === "OTP_EXPIRED") return "ev-expired";
-        if (e === "MSISDN_LOCKED") return "ev-locked";
-        if (e.startsWith("RATE_LIMITED")) return "ev-ratelimit";
-        return "ev-expired";
+      function fmt(n) {
+        return num(n).toLocaleString("ru-RU");
       }
 
-      function cdrBadgeClass(status) {
-        const s = String(status || "").toUpperCase();
-        if (s === "DELIVRD") return "ev-verified";
-        if (s === "SUBMITTED") return "ev-failed";
-        if (s === "UNDELIV") return "ev-locked";
-        return "ev-locked";
+      function som(n) {
+        return `${num(n).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} сом`;
+      }
+
+      function setLed(id, state, text) {
+        const el = $(id);
+        el.dataset.state = state;
+        el.querySelector("span").textContent = text;
+      }
+
+      function setFeedback(tone, text) {
+        elFeedback.dataset.tone = tone;
+        elFeedback.textContent = text;
+      }
+
+      function describeEvent(name) {
+        const key = String(name || "").toUpperCase();
+        if (EVENT_TEXT[key]) return EVENT_TEXT[key];
+        if (key.startsWith("RATE_LIMITED")) return ["Сработал лимит", "bad"];
+        return [key || "Событие", "info"];
       }
 
       function formatTime(ts) {
-        if (!ts) return "-";
+        if (!ts) return "—";
         const idx = ts.indexOf("T");
         return idx >= 0 ? ts.slice(idx + 1, idx + 9) : ts;
       }
 
-      function checkEventForLeak(ev) {
-        if (!ev || typeof ev !== "object") return;
-        if ("code" in ev || "otp" in ev || "otp_code" in ev) {
-          leakedCodesCount += 1;
-        }
-        elLeak.className = leakedCodesCount === 0 ? "pill pill-ok" : "pill pill-bad";
-        elLeak.innerHTML = `<span class="dot"></span>${leakedCodesCount} OTP codes in logs`;
+      // Вспышка поля кода, когда защита отбила попытку.
+      let strikeTimer = null;
+      function strike() {
+        const slots = $("slots");
+        slots.classList.add("struck");
+        clearTimeout(strikeTimer);
+        strikeTimer = setTimeout(() => slots.classList.remove("struck"), reduceMotion ? 900 : 260);
       }
 
-      function renderEvents() {
+      function checkEventForLeak(ev) {
+        if (!ev || typeof ev !== "object") return;
+        if ("code" in ev || "otp" in ev || "otp_code" in ev) leakedCodesCount += 1;
+        setLed("led-leak", leakedCodesCount === 0 ? "ok" : "bad", String(leakedCodesCount));
+      }
+
+      function renderEvents(freshCount = 0) {
         const mFilter = filterMsisdn.value.trim().toLowerCase();
         const ipFilter = filterIp.value.trim().toLowerCase();
+        const body = $("events-tbody");
 
         const filtered = allEvents.filter((ev) => {
           const m = String(ev.msisdn || "").toLowerCase();
           const ip = String(ev.client_ip || "").toLowerCase();
-          if (mFilter && !m.includes(mFilter)) return false;
-          if (ipFilter && !ip.includes(ipFilter)) return false;
-          return true;
+          return (!mFilter || m.includes(mFilter)) && (!ipFilter || ip.includes(ipFilter));
         });
 
         if (filtered.length === 0) {
-          elEventsBody.innerHTML = '<tr><td colspan="6" class="empty-row">No matching security events.</td></tr>';
+          const msg = allEvents.length === 0
+            ? "Событий пока нет. Отправьте код, и запись появится здесь сразу."
+            : "По этому фильтру событий нет. Сбросьте фильтр, чтобы увидеть всё.";
+          body.innerHTML = `<tr><td colspan="6" class="empty">${msg}</td></tr>`;
           return;
         }
 
-        elEventsBody.innerHTML = filtered
-          .slice(0, MAX_EVENTS)
-          .map((ev) => {
-            const cls = eventBadgeClass(ev.event);
-            return `<tr>
-              <td title="${escapeHtml(ev.ts)}">${escapeHtml(formatTime(ev.ts))}</td>
-              <td><span class="badge ${cls}">${escapeHtml(ev.event)}</span></td>
-              <td>${escapeHtml(ev.msisdn || "-")}</td>
-              <td>${escapeHtml(ev.client_ip || "-")}</td>
-              <td>${escapeHtml(ev.status_code || "-")}</td>
-              <td style="color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(ev.detail)}">${escapeHtml(ev.detail || "-")}</td>
-            </tr>`;
-          })
-          .join("");
+        body.innerHTML = filtered.slice(0, MAX_EVENTS).map((ev, i) => {
+          const [label, tone] = describeEvent(ev.event);
+          const rowCls = i < freshCount && !reduceMotion ? ' class="ev-new"' : "";
+          return `<tr${rowCls}>
+            <td class="dim" title="${escapeHtml(ev.ts)}">${escapeHtml(formatTime(ev.ts))}</td>
+            <td><span class="ev ${tone}" title="${escapeHtml(ev.event)}">${escapeHtml(label)}</span></td>
+            <td>${escapeHtml(ev.msisdn || "—")}</td>
+            <td>${escapeHtml(ev.client_ip || "—")}</td>
+            <td class="dim">${escapeHtml(ev.status_code || "—")}</td>
+            <td class="dim detail" title="${escapeHtml(ev.detail)}">${escapeHtml(ev.detail || "—")}</td>
+          </tr>`;
+        }).join("");
       }
 
       function renderTelecom(telecom) {
         if (!telecom) return;
         const gw = telecom.gateway || {};
         const online = Boolean(
-          gw.online ||
-          gw.telecom_online ||
-          gw.bound === "BOUND_TRX" ||
-          gw.status === "BOUND_TRX" ||
-          gw.status === "online"
+          gw.online || gw.telecom_online || gw.bound === "BOUND_TRX" ||
+          gw.status === "BOUND_TRX" || gw.status === "online"
         );
 
-        if (online) {
-          elSmpp.className = "pill pill-ok";
-          elSmpp.innerHTML = '<span class="dot"></span>SMPP: BOUND_TRX';
-          elGwDetail.className = "pill pill-ok";
-          elGwDetail.textContent = "Gateway: BOUND_TRX";
-        } else {
-          elSmpp.className = "pill pill-warn";
-          elSmpp.innerHTML = '<span class="dot"></span>SMPP: STANDBY';
-          elGwDetail.className = "pill pill-muted";
-          elGwDetail.textContent = "Gateway: STANDBY";
-        }
+        setLed("led-smpp", online ? "ok" : "warn", online ? "подключён" : "не запущен");
+        setLed("led-gw", online ? "ok" : "warn", online ? "SMPP подключён" : "не запущен");
+
+        const balOtp = $("bal-otp");
+        const balBulk = $("bal-bulk");
 
         if (!online) {
-          elStorageBadge.className = "pill pill-muted";
-          elStorageBadge.textContent = "STANDBY (Operator Offline)";
-          elBalOtp.textContent = "STANDBY";
-          elBalBulk.textContent = "STANDBY";
+          setLed("led-sdp", "idle", "ждёт шлюз");
+          balOtp.textContent = "—";
+          balBulk.textContent = "—";
+          balBulk.classList.remove("low");
         } else {
           const se = typeof telecom.storage_engine === "string" ? telecom.storage_engine : "";
-          if (se.toLowerCase().includes("postgres")) {
-            elStorageBadge.className = "pill pill-ok";
-            elStorageBadge.textContent = "SDP: PostgreSQL 18 (SDP-07 ACID)";
-          } else if (se) {
-            elStorageBadge.className = "pill pill-info";
-            elStorageBadge.textContent = `SDP: ${se}`;
-          }
+          if (se) setLed("led-sdp", "ok", se.toLowerCase().includes("postgres") ? "PostgreSQL" : se);
 
           if (telecom.balances && typeof telecom.balances === "object") {
-            const balances = telecom.balances;
-            elBalOtp.textContent = "otp_svc" in balances
-              ? `${num(balances.otp_svc, 0).toFixed(2)} som`
-              : "--";
-            elBalBulk.textContent = "bulk_mkt" in balances
-              ? `${num(balances.bulk_mkt, 0).toFixed(2)} som`
-              : "--";
+            const b = telecom.balances;
+            balOtp.textContent = "otp_svc" in b ? som(b.otp_svc) : "—";
+            balBulk.textContent = "bulk_mkt" in b ? som(b.bulk_mkt) : "—";
+            balBulk.classList.toggle("low", "bulk_mkt" in b && num(b.bulk_mkt) < 3);
           }
         }
 
-        if (!("cdrs" in telecom) && online) {
-          return;
-        }
+        if (!("cdrs" in telecom) && online) return;
         const cdrs = Array.isArray(telecom.cdrs) ? telecom.cdrs : [];
+        const body = $("cdrs-tbody");
+
         if (cdrs.length === 0) {
-          elCdrsBody.innerHTML = '<tr><td colspan="7" class="empty-row">No CDR records yet.</td></tr>';
+          body.innerHTML = online
+            ? '<tr><td colspan="7" class="empty">Чеков пока нет. Отправьте код или рассылку.</td></tr>'
+            : '<tr><td colspan="7" class="empty">Шлюз оператора не запущен. Чеки появятся после запуска профиля telecom.</td></tr>';
           return;
         }
 
-        elCdrsBody.innerHTML = cdrs
-          .slice(0, 40)
-          .map((c) => {
-            const st = String(c.status || "SUBMITTED").toUpperCase();
-            const opText = escapeHtml(c.operator || "-");
-            const hlrTag = c.hlr_status === "ABSENT_SUBSCRIBER"
-              ? ' <span class="badge ev-locked" style="font-size:10px;padding:1px 5px;">ABSENT_SUBSCRIBER</span>'
-              : "";
-            return `<tr>
-              <td title="${escapeHtml(c.msg_id)}">${escapeHtml(String(c.msg_id || "").slice(0, 12))}</td>
-              <td>${escapeHtml(c.msisdn || "-")}</td>
-              <td>${opText}${hlrTag}</td>
-              <td>${escapeHtml(c.channel || "-")}</td>
-              <td>${escapeHtml(c.segments ?? 1)}</td>
-              <td>${num(c.cost_som, 0).toFixed(2)}</td>
-              <td><span class="badge ${cdrBadgeClass(st)}">${escapeHtml(st)}</span></td>
-            </tr>`;
-          })
-          .join("");
+        body.innerHTML = cdrs.slice(0, 40).map((c) => {
+          const raw = String(c.status || "SUBMITTED").toUpperCase();
+          const [label, tone] = CDR_TEXT[raw] || [raw, "bad"];
+          const absent = c.hlr_status === "ABSENT_SUBSCRIBER"
+            ? '<span class="absent">абонент вне сети</span>' : "";
+          return `<tr>
+            <td class="dim" title="${escapeHtml(c.msg_id)}">${escapeHtml(String(c.msg_id || "").slice(0, 10))}</td>
+            <td>${escapeHtml(c.msisdn || "—")}</td>
+            <td>${escapeHtml(c.operator || "—")}${absent}</td>
+            <td class="dim">${escapeHtml(c.channel || "—")}</td>
+            <td class="dim">${escapeHtml(c.segments ?? 1)}</td>
+            <td>${num(c.cost_som).toFixed(2).replace(".", ",")}</td>
+            <td><span class="st ${tone}" title="${escapeHtml(raw)}">${escapeHtml(label)}</span></td>
+          </tr>`;
+        }).join("");
       }
 
       function applyStats(data) {
-        const counters = data.counters || {};
-        const sent = num(counters.otp_sent);
-        const verified = num(counters.otp_verified);
+        const c = data.counters || {};
+        const sent = num(c.otp_sent);
+        const verified = num(c.otp_verified);
+        const failed = num(c.otp_failed);
+        const expired = num(c.otp_expired);
         const activeLocks = num(data.active_locks);
-        const lockEvents = num(counters.msisdn_locked);
-        const rlSend = num(counters.rate_limited_send);
-        const rlIp = num(counters.rate_limited_ip);
+        const lockEvents = num(c.msisdn_locked);
+        const rlSend = num(c.rate_limited_send);
+        const rlIp = num(c.rate_limited_ip);
         const blocked = rlSend + rlIp;
         const breaches = num(data.successful_breaches);
 
-        elSent.textContent = sent;
-        elVerified.textContent = verified;
-        elLocked.textContent = activeLocks;
-        elLockedSub.textContent = `Total lock events: ${lockEvents}`;
-        elBlocked.textContent = blocked;
-        elBlockedSub.textContent = `Send: ${rlSend} | IP Spray: ${rlIp}`;
-        elBreaches.textContent = breaches;
-        elBreaches.style.color = breaches === 0 ? "var(--emerald)" : "var(--red)";
+        $("c-sent").textContent = fmt(sent);
+        $("c-verified").textContent = fmt(verified);
+        $("c-failed").textContent = fmt(failed);
+        $("c-expired").textContent = fmt(expired);
+        $("c-locked").textContent = fmt(activeLocks);
+        $("c-locked-sub").textContent = `блокировок всего: ${fmt(lockEvents)}`;
+        $("c-blocked").textContent = fmt(blocked);
+        $("c-blocked-sub").textContent = `выдача: ${fmt(rlSend)}, проверки с IP: ${fmt(rlIp)}`;
+
+        const breachEl = $("breaches");
+        breachEl.textContent = fmt(breaches);
+        breachEl.classList.toggle("breach-bad", breaches > 0);
+
+        const stopped = lockEvents + blocked;
+        $("seal-tally").innerHTML = (failed + stopped) === 0
+          ? "Попыток подбора пока не было."
+          : `Неверных попыток: <strong>${fmt(failed)}</strong>. Защита остановила перебор <strong>${fmt(stopped)}</strong> раз: блокировкой номера после пяти ошибок и лимитами на выдачу и проверку.`;
+
+        // Если между опросами выросли блокировки или лимиты — вспышка.
+        if (lastStats && (lockEvents + blocked) > lastStats.stopped) strike();
+        lastStats = { stopped: lockEvents + blocked };
 
         if (Array.isArray(data.events)) {
           data.events.forEach(checkEventForLeak);
           allEvents = data.events.slice(0, MAX_EVENTS);
           renderEvents();
         }
-
-        if (data.telecom) {
-          renderTelecom(data.telecom);
-        }
+        if (data.telecom) renderTelecom(data.telecom);
       }
 
       async function fetchHealth() {
         try {
           const resp = await fetch("/health");
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          if (!resp.ok && resp.status !== 503) throw new Error(`HTTP ${resp.status}`);
           const h = await resp.json();
           const redisOk = h.redis === "up" || h.status === "ok";
-          elApi.className = redisOk ? "pill pill-ok" : "pill pill-bad";
-          elApi.innerHTML = `<span class="dot"></span>API: ${redisOk ? "OK / REDIS UP" : "DEGRADED"}`;
-          if (h.telecom) {
-            renderTelecom({ gateway: h.telecom });
-          }
+          setLed("led-api", redisOk ? "ok" : "bad", redisOk ? "работает" : "Redis недоступен");
+          if (h.telecom) renderTelecom({ gateway: h.telecom });
         } catch (_err) {
-          elApi.className = "pill pill-bad";
-          elApi.innerHTML = '<span class="dot"></span>API: OFFLINE';
+          setLed("led-api", "bad", "не отвечает");
         }
       }
 
@@ -817,50 +916,38 @@
           if (ip) params.set("ip", ip);
           const resp = await fetch(`/security/stats?${params.toString()}`);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          const data = await resp.json();
-          applyStats(data);
+          applyStats(await resp.json());
         } catch (err) {
-          console.warn("Stats fetch failed:", err);
+          console.warn("Не удалось получить статистику:", err);
         }
       }
 
       function scheduleStatsRefresh() {
-        if (refreshDebounce) clearTimeout(refreshDebounce);
-        refreshDebounce = setTimeout(() => {
-          fetchStats();
-        }, 250);
+        clearTimeout(refreshDebounce);
+        refreshDebounce = setTimeout(fetchStats, 250);
       }
 
       function startPollingFallback() {
         if (pollTimer) return;
-        pollTimer = setInterval(() => {
-          fetchStats();
-          fetchHealth();
-        }, 2000);
+        pollTimer = setInterval(() => { fetchStats(); fetchHealth(); }, 2000);
       }
 
       function stopPollingFallback() {
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       }
 
       function connectSSE() {
         if (typeof EventSource === "undefined") {
-          elStream.className = "pill pill-warn";
-          elStream.innerHTML = '<span class="dot"></span>POLLING: 2s';
+          setLed("led-stream", "warn", "опрос раз в 2 с");
           startPollingFallback();
           return;
         }
-
         const es = new EventSource("/security/stream");
 
         es.onopen = () => {
           sseConnected = true;
           stopPollingFallback();
-          elStream.className = "pill pill-ok";
-          elStream.innerHTML = '<span class="dot"></span>SSE: LIVE';
+          setLed("led-stream", "ok", "в реальном времени");
         };
 
         es.onmessage = (msg) => {
@@ -868,48 +955,36 @@
             const ev = JSON.parse(msg.data);
             checkEventForLeak(ev);
             allEvents.unshift(ev);
-            if (allEvents.length > MAX_EVENTS) {
-              allEvents.length = MAX_EVENTS;
-            }
-            renderEvents();
+            if (allEvents.length > MAX_EVENTS) allEvents.length = MAX_EVENTS;
+            renderEvents(1);
+            if (describeEvent(ev.event)[1] === "bad") strike();
             scheduleStatsRefresh();
           } catch (err) {
-            console.warn("Invalid SSE event:", err);
+            console.warn("Некорректное событие SSE:", err);
           }
         };
 
-        es.addEventListener("telecom_dlr", () => {
-          scheduleStatsRefresh();
-        });
+        es.addEventListener("telecom_dlr", scheduleStatsRefresh);
 
         es.onerror = () => {
           sseConnected = false;
-          elStream.className = "pill pill-warn";
-          elStream.innerHTML = '<span class="dot"></span>POLLING: 2s';
+          setLed("led-stream", "warn", "опрос раз в 2 с");
           startPollingFallback();
         };
       }
 
-      // Filter listeners
-      filterMsisdn.addEventListener("input", () => {
-        renderEvents();
-        scheduleStatsRefresh();
-      });
-      filterIp.addEventListener("input", () => {
-        renderEvents();
-        scheduleStatsRefresh();
-      });
-      document.getElementById("btn-clear-filters").addEventListener("click", () => {
+      filterMsisdn.addEventListener("input", () => { renderEvents(); scheduleStatsRefresh(); });
+      filterIp.addEventListener("input", () => { renderEvents(); scheduleStatsRefresh(); });
+      $("btn-clear-filters").addEventListener("click", () => {
         filterMsisdn.value = "";
         filterIp.value = "";
         renderEvents();
         fetchStats();
       });
 
-      // Interactive Controls
-      document.getElementById("btn-send-otp").addEventListener("click", async () => {
+      $("btn-send-otp").addEventListener("click", async () => {
         const msisdn = testMsisdn.value.trim();
-        elFeedback.textContent = `Sending OTP to ${msisdn}...`;
+        setFeedback("", `Отправляем код на ${msisdn}…`);
         try {
           const resp = await fetch("/otp/send", {
             method: "POST",
@@ -918,50 +993,48 @@
           });
           const body = await resp.json().catch(() => ({}));
           if (resp.ok) {
-            elFeedback.style.color = "var(--emerald)";
-            elFeedback.textContent = `POST /otp/send -> ${resp.status} (${body.status || "sent"}, ttl=${body.expires_in || 120}s)`;
+            setFeedback("ok", `Код отправлен на ${msisdn}. Он действует ${body.expires_in || 120} секунд.`);
+          } else if (resp.status === 423) {
+            setFeedback("bad", `Номер ${msisdn} заблокирован после пяти неверных кодов. Повторить можно через ${body.retry_after ?? "—"} с.`);
+          } else if (resp.status === 429) {
+            setFeedback("warn", `Слишком частые запросы кода. Повторить можно через ${body.retry_after ?? "—"} с.`);
+          } else if (resp.status === 400 || resp.status === 422) {
+            setFeedback("warn", "Номер не принят: нужны 12 цифр, начиная с 996.");
           } else {
-            elFeedback.style.color = "var(--amber)";
-            elFeedback.textContent = `POST /otp/send -> ${resp.status} (${body.detail || "blocked"}, retry=${body.retry_after ?? "-"}s)`;
+            setFeedback("warn", `Сервис ответил ${resp.status}: ${body.detail || "без подробностей"}.`);
           }
           scheduleStatsRefresh();
         } catch (err) {
-          elFeedback.style.color = "var(--red)";
-          elFeedback.textContent = `POST /otp/send failed: ${err.message}`;
+          setFeedback("bad", `Сервис не ответил: ${err.message}. Проверьте, что он запущен.`);
         }
       });
 
-      document.getElementById("btn-bulk-flood").addEventListener("click", async () => {
-        elFeedback.textContent = "Launching Bulk Flood (10 SMS via bulk_mkt)...";
+      $("btn-bulk-flood").addEventListener("click", async () => {
+        setFeedback("", "Запускаем рассылку на 10 SMS…");
         try {
           const resp = await fetch("/telecom/bulk", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              count: 10,
-              text: "Akciya! Skidki 20% tolko segodnya!"
-            }),
+            body: JSON.stringify({ count: 10, text: "Akciya! Skidki 20% tolko segodnya!" }),
           });
           const body = await resp.json().catch(() => ({}));
           if (resp.status === 503) {
-            elFeedback.style.color = "var(--amber)";
-            elFeedback.textContent = "HTTP 503: Operator offline -- start with --profile telecom";
+            setFeedback("warn", "Шлюз оператора не запущен. Запустите сервис с профилем telecom.");
           } else if (resp.status === 402) {
-            elFeedback.style.color = "var(--red)";
-            elFeedback.textContent = "HTTP 402: Insufficient balance for bulk_mkt! Click +500 som to top up.";
+            setFeedback("bad", "На счёте рассылок не хватает денег, ни одно SMS не отправлено. Пополните счёт.");
+          } else if (resp.ok) {
+            setFeedback("ok", "Рассылка принята: 10 SMS ушли в медленную очередь и не задержат коды входа.");
           } else {
-            elFeedback.style.color = resp.ok ? "var(--cyan)" : "var(--amber)";
-            elFeedback.textContent = `POST /telecom/bulk -> ${resp.status} (${JSON.stringify(body).slice(0, 80)})`;
+            setFeedback("warn", `Рассылка не принята, ответ ${resp.status}: ${JSON.stringify(body).slice(0, 80)}`);
           }
           scheduleStatsRefresh();
         } catch (err) {
-          elFeedback.style.color = "var(--red)";
-          elFeedback.textContent = `POST /telecom/bulk failed: ${err.message}`;
+          setFeedback("bad", `Сервис не ответил: ${err.message}.`);
         }
       });
 
-      document.getElementById("btn-topup-bulk").addEventListener("click", async () => {
-        elFeedback.textContent = "Topping up bulk_mkt (+500 som)...";
+      $("btn-topup-bulk").addEventListener("click", async () => {
+        setFeedback("", "Пополняем счёт рассылок на 500 сом…");
         try {
           const resp = await fetch("/telecom/topup", {
             method: "POST",
@@ -970,35 +1043,23 @@
           });
           const body = await resp.json().catch(() => ({}));
           if (resp.status === 503) {
-            elFeedback.style.color = "var(--amber)";
-            elFeedback.textContent = "HTTP 503: Operator offline -- start with --profile telecom";
+            setFeedback("warn", "Шлюз оператора не запущен. Запустите сервис с профилем telecom.");
           } else if (resp.ok) {
-            const bal = body.balances && "bulk_mkt" in body.balances
-              ? `${num(body.balances.bulk_mkt, 0).toFixed(2)} som`
-              : "ok";
-            elFeedback.style.color = "var(--emerald)";
-            elFeedback.textContent = `POST /telecom/topup -> ${resp.status} (bulk_mkt: ${bal})`;
+            const bal = body.balances && "bulk_mkt" in body.balances ? som(body.balances.bulk_mkt) : "обновлён";
+            setFeedback("ok", `Счёт рассылок пополнен. Баланс: ${bal}.`);
           } else {
-            elFeedback.style.color = "var(--amber)";
-            elFeedback.textContent = `POST /telecom/topup -> ${resp.status} (${JSON.stringify(body).slice(0, 80)})`;
+            setFeedback("warn", `Пополнение не прошло, ответ ${resp.status}: ${JSON.stringify(body).slice(0, 80)}`);
           }
           fetchStats();
         } catch (err) {
-          elFeedback.style.color = "var(--red)";
-          elFeedback.textContent = `POST /telecom/topup failed: ${err.message}`;
+          setFeedback("bad", `Сервис не ответил: ${err.message}.`);
         }
       });
 
-      // Initial load + periodic telecom CDR refresh (even while SSE is open, CDR DLR updates happen via /telecom/dlr)
       fetchHealth();
       fetchStats();
       connectSSE();
-      setInterval(() => {
-        if (sseConnected) {
-          fetchStats();
-          fetchHealth();
-        }
-      }, 4000);
+      setInterval(() => { if (sseConnected) { fetchStats(); fetchHealth(); } }, 4000);
     })();
   </script>
 </body>
